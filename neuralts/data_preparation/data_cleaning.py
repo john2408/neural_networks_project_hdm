@@ -1,5 +1,8 @@
 import os 
 import pandas as pd
+import warnings
+import xlrd
+warnings.filterwarnings("ignore")
 
 def data_cleaning(file_path: str, 
                   skiprows: int = 7 
@@ -10,8 +13,14 @@ def data_cleaning(file_path: str,
     column_mapping = {
         'Insgesamt': 'Total',
         'mit Dieselantrieb': 'Diesel',
-        'mit Hybridantrieb': 'Hybrid_column',
-        'mit Hybridantrieb \n(incl. Plug-in-Hybrid)': 'Hybrid_All',
+
+        # Variants of Hybridantrieb naming in different files
+        'mit Hybridantrieb': 'Hybrid',
+        'mit Hybridantrieb (incl. \nPlug-in-Hybrid)': 'Hybrid',
+        'mit Hybridantrieb (incl. Plug-in-Hybrid)': 'Hybrid',
+        'mit Hybridantrieb\n(incl. Plug-in-Hybrid)': 'Hybrid',
+        'mit Hybridantrieb \n(incl. Plug-in-Hybrid)': 'Hybrid',
+
         'Benzin-Hybridantrieb \n(incl. Plug-in-Hybrid)': 'Hybrid_Petrol_All',
         'Diesel-Hybridantrieb \n(incl. Plug-in-Hybrid)': 'Hybrid_Diesel_All',
         'Hybridantrieb \n(ohne Plug-in-Hybrid)': 'Hybrid_NonPlugin',
@@ -21,9 +30,11 @@ def data_cleaning(file_path: str,
         'Benzin-Plug-in-Hybridantrieb': 'Hybrid_Petrol_Plugin',
         'Diesel-Plug-in-Hybridantrieb': 'Hybrid_Diesel_Plugin',
         'mit Elektroantrieb (BEV)': 'Electric_BEV',
+        'mit Elektroantrieb': 'Electric_BEV',
         'mit Allradantrieb': 'All_Wheel_Drive',
         'Cabriolets': 'Convertibles'
     }
+
 
     file_name = file_path.split("/")[-1]
     year, month = file_name.split("_")[1], file_name.split("_")[-1].split(".")[0]
@@ -31,13 +42,13 @@ def data_cleaning(file_path: str,
 
     # Load the Excel file
     # Check existing sheet names to determine correct sheet name
-    xls = pd.ExcelFile(file_path)
-    if "FZ10.1" in xls.sheet_names:
-        sheet_name = "FZ10.1"
-    elif "FZ 10.1" in xls.sheet_names:
-        sheet_name = "FZ 10.1"
-    else:
-        raise ValueError(f"Sheet name for file {file_path} not found.")
+    xls = pd.ExcelFile(file_path, engine='openpyxl' if file_path.endswith('.xlsx') else 'xlrd')
+    
+    sheet_name = [sheet for sheet in xls.sheet_names if 'FZ' in sheet or 'Pkw-NZL Marken, Modellreihen' in sheet]
+
+    assert len(sheet_name) == 1, f"No sheet with 'FZ' found in file {file_path}"
+
+    sheet_name = sheet_name[0]
     
     df = pd.read_excel(file_path, 
                        sheet_name=sheet_name)
@@ -80,6 +91,9 @@ def data_cleaning(file_path: str,
     # Examles are OEMs like MAXUS and MORGAN which have no specific model names
     df['Model'].fillna("SONSTIGE", inplace=True)
 
+    # IF OEM is Null, drop the rows
+    df.dropna(subset=['OEM'], inplace=True)
+
     # Validate no missing values remain
     try:
         assert df.isnull().any().any() == False
@@ -89,13 +103,14 @@ def data_cleaning(file_path: str,
 
     df.rename(columns=column_mapping, inplace=True)
 
-    # All columns containing the word 'Hybrid' are added up
-    hybrid_columns = [col for col in df.columns if 'Hybrid' in col]
-    df['Hybrid'] = df[hybrid_columns].sum(axis=1)
-    df.drop(columns=hybrid_columns, inplace=True)
-
     # Calculate 'Petrol' columns as Total - Diesel - Electric - Hybrid
     df['Petrol'] = df['Total'] - df['Diesel'] - df['Electric_BEV'] - df['Hybrid']
+
+    final_columns = ['OEM', 'Model', 'Total', 'Petrol', 'Diesel', 
+                     'Electric_BEV', 'Hybrid', 
+                     'All_Wheel_Drive',  'Convertibles']
+    
+    df = df[final_columns].copy()
 
     # Reshape DataFrame from wide to long format
     df = df.melt(id_vars=["OEM", "Model"], 
@@ -117,13 +132,13 @@ if __name__ == "__main__":
     storage_path = os.path.join(os.getcwd(), "data/raw/kba/")
 
     # List all donwnloaded files
-    available_files = os.listdir(storage_path)
+    available_files = [file for file in os.listdir(storage_path) if file.endswith(".xlsx") or file.endswith(".xls")]
     print("Downloaded files:", available_files)
 
     dfs = []
 
     for file_name in available_files:
-    #for file_name in ['fz10_2024_08.xlsx']:
+    #for file_name in ['fz10_2018_04.xls']:
 
         file_path = os.path.join(storage_path, file_name)
         
@@ -137,3 +152,7 @@ if __name__ == "__main__":
     df = pd.concat(dfs)
 
     print(df.shape)
+
+    # Save cleaned data
+    cleaned_data_path = os.path.join(os.getcwd(), "data/processed/historical_kba_data.parquet")
+    df.to_parquet(cleaned_data_path)

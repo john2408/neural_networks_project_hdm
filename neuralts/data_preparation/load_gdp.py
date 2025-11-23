@@ -1,0 +1,2 @@
+# Load GDP data for Germany
+# Data Source: https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?listId=www_ssb_lr_bip&tsId=BBNZ1.Q.DE.N.H.0000.L&dateSelect=2025

@@ -97,12 +97,11 @@ This study explores multiple forecasting methodologies:
 - **Univariate Models:** Time series forecasting based solely on historical registration patterns of individual model-powertrain combinations
 - **Multivariate Models:** Leveraging relationships between multiple time series (e.g., cross-model dependencies, powertrain correlations)
 - **Exogenous Variables Integration:** Incorporating external economic indicators to enhance forecast accuracy:
-  - Monthly GDP growth rates
-  - Interest rates (ECB policy rates)
-  - Consumer confidence indices
-  - Fuel prices
-  - Government incentives for electric vehicles
-  - Other relevant socioeconomic indicators
+  - Monthly GDP growth rates from [Bundesbank Time Series Database](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?listId=www_ssb_lr_bip)
+  - Interest rates from [Bundesbank Time Series Database](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/759784/759784?listId=www_szista_mb01)
+  - Employment level from [Bundesbank Time Series Database](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?tsId=BBDL1.M.DE.N.EMP.EBA000.A0000.A00.D00.0.ABA.A&listId=www_siws_mb09_06b)
+  - Fuel prices (oil prices from [European Commission Weekly Oil Bulletin](https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en))
+  - Sociodemographic indicators (from [Destatis GENESIS-Online Database](https://www-genesis.destatis.de/datenbank/online/))
 
 The comparative evaluation of these approaches will provide insights into the relative importance of internal patterns versus external factors in automotive registration forecasting.
 
@@ -236,6 +235,11 @@ This section will discuss:
 ## References
 
 1. Kraftfahrt-Bundesamt (KBA). (2018-2025). *Fahrzeugzulassungen - FZ10 Monatsergebnisse*. Retrieved from https://www.kba.de
+2. European Commission. (2025). *Weekly Oil Bulletin*. Directorate-General for Energy. Retrieved from https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en
+3. Statistisches Bundesamt (Destatis). (2025). *GENESIS-Online Datenbank*. Retrieved from https://www-genesis.destatis.de/datenbank/online/
+4. Deutsche Bundesbank. (2025). *Time Series Databases - Interest Rates and Yields*. Retrieved from https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/759784/759784?listId=www_szista_mb01
+5. Deutsche Bundesbank. (2025). *Time Series Databases - Gross Domestic Product*. Retrieved from https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?listId=www_ssb_lr_bip
+6. Deutsche Bundesbank. (2025). *Time Series Databases - Employment Level*. Retrieved from https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?tsId=BBDL1.M.DE.N.EMP.EBA000.A0000.A00.D00.0.ABA.A&listId=www_siws_mb09_06b
 
 ---
 

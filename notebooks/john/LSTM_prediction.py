@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 
 # Parameters 
 SEQ_LENGTH = 6
-INPUT_SIZE = 3748
+INPUT_SIZE = 2307
 EPOCHS = 50
 BATCH_SIZE = 256
 LEARNING_RATE = 0.001

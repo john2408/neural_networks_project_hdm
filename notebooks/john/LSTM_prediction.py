@@ -40,9 +40,9 @@ with open('models/lstm/ts_key_to_idx.pkl', 'rb') as f:
     ts_key_to_idx = pickle.load(f)
 
 
-# Filter BMW time series
-bmw_series = df[df['ts_key'].str.contains('X1', case=False, na=False)]['ts_key'].unique()[:10]
-print(f"\nFound {len(bmw_series)} BMW time series")
+# Filter time series
+ts_keys_samples = df[df['ts_key'].str.contains('A-KLASSE', case=False, na=False)]['ts_key'].unique()[:10]
+print(f"\nFound {len(ts_keys_samples)}  time series")
 print(f"Target months: Aug 2025, Sep 2025, Oct 2025")
 
 model = LSTMForecaster(
@@ -69,7 +69,7 @@ scaler_y = checkpoint['scaler_y']
 predictions_data = []
 predictions_data = []
 
-for ts_key in bmw_series:
+for ts_key in ts_keys_samples:
     # Get historical data for this time series
     ts_data = df[df['ts_key'] == ts_key].sort_values('Date').copy()
 
@@ -154,25 +154,21 @@ for ts_key in bmw_series:
 
 output_path = os.path.join(cwd, "models", "lstm", "predictions")
 
-predictions_file = os.path.join(output_path, 'bmw_predictions_2025.csv')
+predictions_file = os.path.join(output_path, 'predictions_2025.csv')
 # Create predictions DataFrame
 predictions_df = pd.DataFrame(predictions_data)
 predictions_df.to_csv(predictions_file, index=False)
 print(f"\n✓ Predictions saved to: {predictions_file}")
 print(f"  Total predictions: {len(predictions_df)}")
-print(f"  BMW series with predictions: {predictions_df['ts_key'].nunique()}")
+print(f"  series with predictions: {predictions_df['ts_key'].nunique()}")
 
-# STEP 8: Visualization for sample BMW series
+# STEP 8: Visualization for sample series
 print("\n" + "="*60)
 print("STEP 8: Creating visualization")
 print("="*60)
 
-# Select a few representative BMW series for visualization
-sample_series = ['BMW_3ER_Total', 'BMW_5ER_Total', 'BMW_X5_Total', 'BMW_iX_Total']
-sample_series = [s for s in sample_series if s in bmw_series]
 
-if not sample_series:
-    sample_series = list(bmw_series[:4])  # Take first 4 if specific ones don't exist
+sample_series = list(ts_keys_samples[:6]) 
 
 n_series = len(sample_series)
 fig, axes = plt.subplots(n_series, 1, figsize=(16, 5*n_series))
@@ -247,18 +243,6 @@ for idx, ts_key in enumerate(sample_series):
                   alpha=0.1, color='red', label='_nolegend_')
 
 plt.tight_layout(pad=2.0)
-plt.savefig(os.path.join(output_path, 'bmw_predictions_visualization.png'), dpi=300, bbox_inches='tight')
-print(f"✓ Saved: {os.path.join(output_path, 'bmw_predictions_visualization.png')}")
+plt.savefig(os.path.join(output_path, 'predictions_visualization.png'), dpi=300, bbox_inches='tight')
+print(f"✓ Saved: {os.path.join(output_path, 'predictions_visualization.png')}")
 plt.close()
-
-print("\n" + "="*60)
-print("All tasks completed!")
-print("="*60)
-print(f"\nMemory-efficient approach:")
-print(f"  ✓ No pivoting required")
-print(f"  ✓ One-hot encoding on-the-fly")
-print(f"  ✓ Single model for all {n_ts_keys} time series")
-print(f"\nOutputs:")
-print(f"  ✓ Model: best_lstm_model_complete.pth")
-print(f"  ✓ Predictions: bmw_predictions_2025.csv")
-print(f"  ✓ Visualization: bmw_predictions_visualization.png")

@@ -5,7 +5,12 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import warnings
+import pickle
+import time
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+   
 warnings.filterwarnings('ignore')
+
 
 # Check MPS availability
 if torch.backends.mps.is_available():
@@ -19,6 +24,7 @@ else:
     print(f"Using CPU")
     
 print(f"Device: {device}")
+
 
 
 class TimeSeriesDataset(Dataset):
@@ -191,6 +197,9 @@ if __name__ == "__main__":
     import os
     cwd = os.getcwd()
     full_path = os.path.join(cwd, "data", "processed", "historical_kba_data.parquet")
+    output_path = os.path.join(cwd, "models", "lstm")
+    os.makedirs(output_path, exist_ok=True)
+
     df = pd.read_parquet(full_path, engine='fastparquet')
     df["ts_key_size"] = df.groupby('ts_key')['ts_key'].transform('size')
 
@@ -219,7 +228,7 @@ if __name__ == "__main__":
     print(f"  - ts_key one-hot ({df.ts_key.nunique()})")
     print(f"  = Total: {3 + df.ts_key.nunique()} features")
     
-    SEQ_LENGTH = 6
+    SEQ_LENGTH = 8
     TRAIN_RATIO = 0.8
     
     train_dataset = TimeSeriesDataset(
@@ -240,7 +249,6 @@ if __name__ == "__main__":
     ts_key_to_idx = train_dataset.ts_key_to_idx
     
     # Store ts_key_to_idx as pickle object
-    import pickle
     with open('models/lstm/ts_key_to_idx.pkl', 'wb') as f:
         pickle.dump(ts_key_to_idx, f)
 
@@ -318,7 +326,6 @@ if __name__ == "__main__":
     print("STEP 4: Training")
     print("="*60)
     
-    import time
     
     def train_epoch(model, loader, criterion, optimizer, device):
         model.train()
@@ -363,7 +370,7 @@ if __name__ == "__main__":
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             # Save both model state and full model
-            torch.save(model.state_dict(), 'best_lstm_model.pth')
+            torch.save(model.state_dict(), os.path.join(output_path, 'best_lstm_model.pth'))
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'input_size': INPUT_SIZE,
@@ -375,7 +382,8 @@ if __name__ == "__main__":
                 'n_ts_keys': n_ts_keys,
                 'ts_key_to_idx': ts_key_to_idx,
                 'seq_length': SEQ_LENGTH
-            }, 'best_lstm_model_complete.pth')
+                
+            }, os.path.join(output_path, 'best_lstm_model_complete.pth'))
         
         if (epoch + 1) % 10 == 0 or epoch == 0:
             elapsed = time.time() - start_time
@@ -391,8 +399,7 @@ if __name__ == "__main__":
     print("STEP 5: Evaluation Metrics")
     print("="*60)
     
-    from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
-    
+ 
     def smape(y_true, y_pred):
         """Symmetric Mean Absolute Percentage Error"""
         denominator = (np.abs(y_true) + np.abs(y_pred)) / 2.0
@@ -453,7 +460,7 @@ if __name__ == "__main__":
     ax.legend(fontsize=11)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig('lstm_training_history.png', dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_path, 'lstm_training_history.png'), dpi=300, bbox_inches='tight')
     print("✓ Saved: lstm_training_history.png")
     plt.close()
     
@@ -485,8 +492,5 @@ if __name__ == "__main__":
     print("✓ Saved: lstm_predictions_analysis.png")
     plt.close()
     
-    print("\n" + "="*60)
-    print("STEP 7: Autoregressive Predictions for BMW Time Series")
-    print("="*60)
     
     

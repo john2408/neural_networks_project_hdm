@@ -29,6 +29,14 @@ df["ts_key_size"] = df.groupby('ts_key')['ts_key'].transform('size')
 # Filter ts_keys with at least 12 entries
 df = df[df['ts_key_size'] >= 12].copy()
 
+# Do not include timeseries which have the last 12 months as zero values
+recent_12_months = df['Date'].max() - pd.DateOffset(months=12)
+recent_data = df[df['Date'] > recent_12_months]
+zero_value_ts_keys = recent_data.groupby('ts_key')['Value'].sum()
+zero_value_ts_keys = zero_value_ts_keys[zero_value_ts_keys == 0].index
+df = df[~df['ts_key'].isin(zero_value_ts_keys)].copy()
+
+
 columns = ['Date','ts_key', 'Value']
 df = df[columns].copy()
 

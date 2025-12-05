@@ -206,6 +206,13 @@ if __name__ == "__main__":
     # Filter ts_keys with at least 12 entries
     df = df[df['ts_key_size'] >= 12].copy()
 
+    # Do not include timeseries which have the last 12 months as zero values
+    recent_12_months = df['Date'].max() - pd.DateOffset(months=12)
+    recent_data = df[df['Date'] > recent_12_months]
+    zero_value_ts_keys = recent_data.groupby('ts_key')['Value'].sum()
+    zero_value_ts_keys = zero_value_ts_keys[zero_value_ts_keys == 0].index
+    df = df[~df['ts_key'].isin(zero_value_ts_keys)].copy()
+
     columns = ['Date','ts_key', 'Value']
     df = df[columns].copy()
     
@@ -408,7 +415,7 @@ if __name__ == "__main__":
         return 100 * np.mean(diff)
     
     # Load best model
-    model.load_state_dict(torch.load('best_lstm_model.pth'))
+    model.load_state_dict(torch.load(os.path.join(output_path, 'best_lstm_model.pth')))
     model.eval()
     
     # Get predictions
@@ -488,7 +495,7 @@ if __name__ == "__main__":
     axes[1].grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig('lstm_predictions_analysis.png', dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_path, 'lstm_predictions_analysis.png'), dpi=300, bbox_inches='tight')
     print("✓ Saved: lstm_predictions_analysis.png")
     plt.close()
     

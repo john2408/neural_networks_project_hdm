@@ -29,30 +29,49 @@ print(f"Device: {device}")
 
 class TimeSeriesDataset(Dataset):
     """
-    Dataset for MULTIVARIATE time series with sliding window approach.
-    Each sample: [features(t-6), ..., features(t-1)] -> target(t)
-    Features include: Value + one-hot encoded ts_key + year + month
+    Dataset for MULTIVARIATE time series with sliding window approach and embargo period.
+    Each sample: [features(t-seq_length-embargo), ..., features(t-1-embargo)] -> target(t)
+    Features include: Value + additional features + year + month + one-hot encoded ts_key
     Memory efficient: doesn't pivot the entire dataframe
+    
+    Embargo period creates a gap between last observation and prediction to avoid overfitting
+    due to autocorrelation. E.g., with seq_length=3 and embargo=1:
+        X = [t-4, t-3, t-2] -> Y = t (skipping t-1)
     """
-    def __init__(self, df, seq_length=6, train=True, train_ratio=0.8):
+    def __init__(self, df, feature_cols=None, seq_length=6, embargo=1, train=True, train_ratio=0.8):
         """
         Args:
-            df: DataFrame with columns [Date, ts_key, Value]
-            seq_length: Lookback window (6 months)
+            df: DataFrame with columns [Date, ts_key, Value, ...additional features]
+            feature_cols: List of additional feature column names (e.g., economic indicators)
+                         If None, will auto-detect (all columns except Date, ts_key, Value)
+            seq_length: Lookback window (number of timesteps)
+            embargo: Number of months to skip between last observation and prediction target
             train: If True, create training set, else test set
             train_ratio: Train/test split ratio
         """
         self.seq_length = seq_length
+        self.embargo = embargo
         self.X = []
         self.y = []
         self.ts_keys_list = []
+        
+        # Auto-detect feature columns if not provided
+        if feature_cols is None:
+            self.feature_cols = [col for col in df.columns 
+                                if col not in ['Date', 'ts_key', 'Value']]
+        else:
+            self.feature_cols = feature_cols
+        
+        self.n_features_additional = len(self.feature_cols)
         
         # Create one-hot encoding mapping for ts_keys
         unique_ts_keys = sorted(df['ts_key'].unique())
         self.ts_key_to_idx = {key: idx for idx, key in enumerate(unique_ts_keys)}
         self.n_ts_keys = len(unique_ts_keys)
         
-        print(f"Creating one-hot encoding for {self.n_ts_keys} time series...")
+        print(f"Creating dataset with {self.n_ts_keys} time series...")
+        print(f"Additional features: {self.n_features_additional}")
+        print(f"Sequence length: {seq_length}, Embargo: {embargo}")
         
         # Group by time series key
         grouped = df.sort_values('Date').groupby('ts_key')
@@ -61,8 +80,13 @@ class TimeSeriesDataset(Dataset):
             values = group['Value'].values
             dates = pd.to_datetime(group['Date'].values)
             
-            # Skip if not enough data
-            if len(values) < seq_length + 1:
+            # Extract additional features
+            if self.n_features_additional > 0:
+                additional_features = group[self.feature_cols].values
+            
+            # Skip if not enough data (need seq_length + embargo)
+            min_length = seq_length + embargo
+            if len(values) < min_length + 1:
                 continue
             
             # Get one-hot encoding for this ts_key
@@ -70,30 +94,49 @@ class TimeSeriesDataset(Dataset):
             ts_key_onehot = np.zeros(self.n_ts_keys, dtype=np.float32)
             ts_key_onehot[ts_key_idx] = 1.0
             
-            # Create sliding windows
-            for i in range(len(values) - seq_length):
+            # Create sliding windows with embargo
+            # If embargo=1: X ends at t-2, Y is at t (skipping t-1)
+            for i in range(len(values) - seq_length - embargo):
                 # Collect features for each timestep in the window
                 window_features = []
                 
                 for j in range(seq_length):
-                    # Features: [value, year, month, ts_key_onehot...]
+                    # Features: [value, additional_features..., year, month, ts_key_onehot...]
                     date = dates[i + j]
+                    
+                    features_list = [values[i + j]]  # Value
+                    
+                    # Add additional features if present
+                    if self.n_features_additional > 0:
+                        features_list.append(additional_features[i + j])
+                    
+                    # Add temporal features
+                    features_list.extend([date.year, date.month])
+                    
+                    # Add one-hot encoding
+                    features_list.append(ts_key_onehot)
+                    
+                    # Concatenate all features
                     features = np.concatenate([
-                        [values[i + j]],           # Value
-                        [date.year],               # Year
-                        [date.month],              # Month
-                        ts_key_onehot              # One-hot encoded ts_key
+                        np.array(f).flatten() if not isinstance(f, (int, float)) else [f]
+                        for f in features_list
                     ])
+                    
                     window_features.append(features)
                 
-                self.X.append(np.array(window_features))  # Shape: (6, n_features)
-                self.y.append(values[i + seq_length])      # Target value
+                self.X.append(np.array(window_features))  # Shape: (seq_length, n_features)
+                # Target is embargo periods ahead from last observation
+                self.y.append(values[i + seq_length + embargo - 1])
                 self.ts_keys_list.append(ts_key)
         
-        self.X = np.array(self.X, dtype=np.float32)  # Shape: (n_samples, 6, n_features)
+        self.X = np.array(self.X, dtype=np.float32)  # Shape: (n_samples, seq_length, n_features)
         self.y = np.array(self.y, dtype=np.float32)  # Shape: (n_samples,)
         
         print(f"Created {len(self.X)} samples with feature dimension: {self.X.shape[2]}")
+        print(f"  - Value: 1")
+        print(f"  - Additional features: {self.n_features_additional}")
+        print(f"  - Temporal (year, month): 2")
+        print(f"  - One-hot ts_key: {self.n_ts_keys}")
         
         # Train-test split (chronological)
         n_samples = len(self.X)
@@ -108,13 +151,13 @@ class TimeSeriesDataset(Dataset):
             self.y = self.y[train_size:]
             self.ts_keys_list = self.ts_keys_list[train_size:]
         
-        # Standardize features (only Value, year, month - not one-hot)
+        # Standardize features (Value + additional features + year + month - NOT one-hot)
         self.scaler_X = StandardScaler()
         self.scaler_y = StandardScaler()
         
-        # Extract continuous features (Value, year, month) for scaling
+        # Extract continuous features for scaling
         n_samples, seq_len, n_features = self.X.shape
-        n_continuous = 3  # Value, year, month
+        n_continuous = 1 + self.n_features_additional + 2  # Value + additional + year + month
         
         X_continuous = self.X[:, :, :n_continuous].reshape(-1, n_continuous)
         X_onehot = self.X[:, :, n_continuous:].reshape(-1, self.n_ts_keys)
@@ -196,53 +239,67 @@ if __name__ == "__main__":
     # Load data
     import os
     cwd = os.getcwd()
-    full_path = os.path.join(cwd, "data", "processed", "historical_kba_data.parquet")
+    full_path = os.path.join(cwd, "data", "processed", "monthly_registration_volume_gold.parquet")
     output_path = os.path.join(cwd, "models", "lstm")
     os.makedirs(output_path, exist_ok=True)
 
     df = pd.read_parquet(full_path, engine='fastparquet')
-    df["ts_key_size"] = df.groupby('ts_key')['ts_key'].transform('size')
+    df['Year'] = df['Date'].dt.year
+    df['Month'] = df['Date'].dt.month
 
-    # Filter ts_keys with at least 12 entries
-    df = df[df['ts_key_size'] >= 12].copy()
-
-    # Do not include timeseries which have the last 12 months as zero values
-    recent_12_months = df['Date'].max() - pd.DateOffset(months=12)
-    recent_data = df[df['Date'] > recent_12_months]
-    zero_value_ts_keys = recent_data.groupby('ts_key')['Value'].sum()
-    zero_value_ts_keys = zero_value_ts_keys[zero_value_ts_keys == 0].index
-    df = df[~df['ts_key'].isin(zero_value_ts_keys)].copy()
-
-    columns = ['Date','ts_key', 'Value']
-    df = df[columns].copy()
+    date_col = 'Date'
+    ts_key_col = 'ts_key'
+    value_col = 'Value'
+    features = [col for col in df.columns if col not in [date_col, ts_key_col, value_col]]
     
-    print("="*60)
+
+    #Validate not NaN or infinite values in features
+    assert not df[features].isna().any().any(), "NaN values found in features"
+    assert not np.isinf(df[features].select_dtypes(include=[np.number])).any().any(), "Infinite values found in features"
+
+    print("-"*60)
     print("DATA OVERVIEW")
-    print("="*60)
+    print("-"*60)
     print(f"Original data shape: {df.shape}")
     print(f"Unique time series: {df.ts_key.nunique()}")
     print(f"Date range: {df.Date.min()} to {df.Date.max()}")
     print(f"Total observations: {len(df):,}")
     
+
+    # Check original data
+    print(f"\nOriginal DataFrame:")
+    print(f"  NaN values: {df.isna().sum().sum()}")
+    print(f"  Inf values: {np.isinf(df.select_dtypes(include=[np.number])).sum().sum()}")
+    print(f"  Value range: [{df['Value'].min():.2f}, {df['Value'].max():.2f}]")
+    
+    # Check for zero/very small values that could cause division issues
+    print(f"\nZero values in 'Value' column: {(df['Value'] == 0).sum()}")
+    print(f"Values < 0.01: {(df['Value'] < 0.01).sum()}")
+    
+
+
     # STEP 1: Create datasets with one-hot encoding
-    print("\n" + "="*60)
+    print("\n" + "-"*60)
     print("STEP 1: Creating multivariate dataset")
-    print("="*60)
+    print("-"*60)
     print("Features per timestep:")
     print("  - Value (1)")
     print("  - Year (1)")
     print("  - Month (1)")
+    print(f"  - Additional features ({len(features)})")
     print(f"  - ts_key one-hot ({df.ts_key.nunique()})")
-    print(f"  = Total: {3 + df.ts_key.nunique()} features")
+    print(f"  = Total: {3 + len(features) + df.ts_key.nunique()} features")
     
     SEQ_LENGTH = 8
     TRAIN_RATIO = 0.8
+    EMBARGO = 1  # months to skip between last observation and prediction target
     
     train_dataset = TimeSeriesDataset(
         df,
+        feature_cols=features, 
         seq_length=SEQ_LENGTH,
-        train=True,
-        train_ratio=TRAIN_RATIO
+        embargo=EMBARGO,
+        train=True
     )
     
     print(f"\nTraining samples: {len(train_dataset):,}")
@@ -263,31 +320,37 @@ if __name__ == "__main__":
         df,
         seq_length=SEQ_LENGTH,
         train=False,
+        embargo=EMBARGO,
         train_ratio=TRAIN_RATIO
     )
     
+    # -------------------------------------------------
     # Apply training scalers to test set
+    # -------------------------------------------------
+
+    # Extract continuous features for scaling
     n_samples, seq_len, n_features = test_dataset.X.shape
-    n_continuous = 3  # Value, year, month
+    n_continuous = 1 + test_dataset.n_features_additional + 2  # Value + additional + year + month
     
     X_continuous = test_dataset.X[:, :, :n_continuous].reshape(-1, n_continuous)
     X_onehot = test_dataset.X[:, :, n_continuous:].reshape(-1, n_ts_keys)
     
-    X_continuous_scaled = scaler_X.transform(X_continuous)
+    X_continuous_scaled = scaler_X.fit_transform(X_continuous)
     X_continuous_scaled = X_continuous_scaled.reshape(n_samples, seq_len, n_continuous)
     X_onehot_reshaped = X_onehot.reshape(n_samples, seq_len, n_ts_keys)
     
+    # Concatenate scaled continuous + unscaled one-hot
     test_dataset.X = np.concatenate([X_continuous_scaled, X_onehot_reshaped], axis=2)
-    test_dataset.y = scaler_y.transform(test_dataset.y.reshape(-1, 1)).flatten()
+    test_dataset.y = test_dataset.scaler_y.fit_transform(test_dataset.y.reshape(-1, 1)).flatten()
     test_dataset.scaler_X = scaler_X
     test_dataset.scaler_y = scaler_y
-    
+
     print(f"Test samples: {len(test_dataset):,}")
     
     # STEP 2: Initialize model with correct input size
-    print("\n" + "="*60)
+    print("\n" + "-"*60)
     print("STEP 2: Initializing multivariate LSTM model")
-    print("="*60)
+    print("-"*60)
     
     INPUT_SIZE = train_dataset.X.shape[2]  # Value + year + month + one-hot
     
@@ -308,19 +371,20 @@ if __name__ == "__main__":
     print(f"\nTotal parameters: {sum(p.numel() for p in model.parameters()):,}")
     
     # STEP 3: Training setup
-    print("\n" + "="*60)
+    print("\n" + "-"*60)
     print("STEP 3: Training setup")
-    print("="*60)
+    print("-"*60)
     
-    EPOCHS = 50
+    EPOCHS = 25
     BATCH_SIZE = 256
     LEARNING_RATE = 0.001
+    WEIGHT_DECAY = 1e-5
     
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
     
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
     
     print(f"Epochs: {EPOCHS}")
@@ -329,9 +393,9 @@ if __name__ == "__main__":
     print(f"Batches per epoch: {len(train_loader)}")
     
     # STEP 4: Training loop
-    print("\n" + "="*60)
+    print("\n" + "-"*60)
     print("STEP 4: Training")
-    print("="*60)
+    print("-"*60)
     
     
     def train_epoch(model, loader, criterion, optimizer, device):
@@ -402,9 +466,9 @@ if __name__ == "__main__":
     print(f"\n✓ Model saved to: best_lstm_model_complete.pth")
     
     # STEP 5: Evaluation metrics
-    print("\n" + "="*60)
+    print("\n" + "-"*60)
     print("STEP 5: Evaluation Metrics")
-    print("="*60)
+    print("-"*60)
     
  
     def smape(y_true, y_pred):
@@ -451,9 +515,9 @@ if __name__ == "__main__":
     print(f"  SMAPE: {smape_score:.2f}%")
     
     # STEP 6: Visualization
-    print("\n" + "="*60)
+    print("\n" + "-"*60)
     print("STEP 6: Saving visualizations")
-    print("="*60)
+    print("-"*60)
     
     import matplotlib.pyplot as plt
     

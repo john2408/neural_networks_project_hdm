@@ -1,4 +1,4 @@
-# Load file in the location 
+# Loads file in the location 
 # data/raw/statistisches_bundesamt/consumer_price_index.xlsx
 
 import pandas as pd

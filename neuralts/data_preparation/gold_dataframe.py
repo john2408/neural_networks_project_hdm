@@ -20,6 +20,7 @@ class GoldDataFrameConfig:
 
     include_historical_deposit_rates: bool = True
     historical_deposit_rates_path: str = "data/processed/historical_deposit_rate.parquet"
+    historical_deposit_rates_cols_to_drop = ["Deposit_Rate_YoY_Relative_Change"]
 
     include_employment_level_germany: bool = True
     employment_level_germany_path: str = (
@@ -52,11 +53,43 @@ def validate_no_missing_values(df: pd.DataFrame, file_path: str):
         print(df.isnull().sum())
 
 
+def apply_timeseries_cleaning(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply common time series cleaning steps to the DataFrame."""
+
+
+    print("Initial shape before cleaning:", df.shape)
+    print("Initial number of unique ts_keys:", df['ts_key'].nunique())
+
+    # Apply some data Quality Checks for the timeseries     
+    df["ts_key_size"] = df.groupby('ts_key')['ts_key'].transform('size')
+
+    # Filter ts_keys with at least 12 entries
+    df = df[df['ts_key_size'] >= 12].copy()
+
+    # Do not include timeseries which have the last 12 months as zero values
+    recent_12_months = df['Date'].max() - pd.DateOffset(months=12)
+    recent_data = df[df['Date'] > recent_12_months]
+    zero_value_ts_keys = recent_data.groupby('ts_key')['Value'].sum()
+    zero_value_ts_keys = zero_value_ts_keys[zero_value_ts_keys == 0].index
+    df = df[~df['ts_key'].isin(zero_value_ts_keys)].copy()
+
+    # keep only ts_key contain data until max date 
+    max_date = df['Date'].max()
+    ts_keys_with_max_date = df[df['Date'] == max_date]['ts_key'].unique()
+    df = df[df['ts_key'].isin(ts_keys_with_max_date)].copy()
+
+    print("Final shape after cleaning:", df.shape)
+    print("Final number of unique ts_keys:", df['ts_key'].nunique())
+
+    return df
+
 def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
     """add all features to KBA dataframe to create gold dataframe"""
 
     # First load KBA data
     kba_df = pd.read_parquet(config.kba_data_path, engine="fastparquet")
+
+    kba_df = apply_timeseries_cleaning(kba_df)
 
     # Limit data to < 31.10.2025, since most features are only available up to Sep 2025
     kba_df = kba_df[kba_df["Date"] < "2025-10-31"].copy()
@@ -94,6 +127,9 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
     if config.include_historical_deposit_rates:
         deposit_rates_df = pd.read_parquet(
             config.historical_deposit_rates_path, engine="fastparquet"
+        )
+        deposit_rates_df = deposit_rates_df.drop(
+            columns=config.historical_deposit_rates_cols_to_drop
         )
         df_gold = df_gold.merge(deposit_rates_df, on="Date", how="left")
 
@@ -135,7 +171,21 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
         df_gold.shape[0] == kba_df.shape[0]
     ), "Row count mismatch after merging features. Please check the merge operations."
 
+
+    # Fill infity values with interpolation of neughboring values
+    df_gold.replace([float("inf"), float("-inf")], pd.NA, inplace=True)
+    df_gold.interpolate(method='linear', inplace=True)
+
+    # Check if any column has infinite values
+    if df_gold.isin([float("inf"), float("-inf")]).any().any():
+        raise ValueError("DataFrame contains infinite values. Please check the data.")
+    
+    validate_no_missing_values(df_gold, "None")
+
+    
+
     return df_gold
+
 
 
 if __name__ == "__main__":

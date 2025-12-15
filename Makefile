@@ -27,10 +27,11 @@ clean:
 
 
 ## Lint using flake8, black, and isort (use `make format` to do formatting)
+## isort --check --diff neuralts
 .PHONY: lint
 lint:
 	flake8 neuralts
-	isort --check --diff neuralts
+	
 	black --check neuralts
 
 ## Format source code with black

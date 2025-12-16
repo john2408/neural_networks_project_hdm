@@ -22,12 +22,6 @@ class GoldDataFrameConfig:
     historical_deposit_rates_path: str = "data/processed/historical_deposit_rate.parquet"
     historical_deposit_rates_cols_to_drop = ["Deposit_Rate_YoY_Relative_Change"]
 
-    include_employment_level_germany: bool = True
-    employment_level_germany_path: str = (
-        "data/processed/historical_employment_level_germany.parquet"
-    )
-    employment_level_cols_to_drop = ["Month", "Year"]
-
     include_gdp_germany: bool = True
     gdp_germany_path: str = "data/processed/historical_GDP_germany.parquet"
     gdp_germany_cols_to_drop = ["Month", "Year"]
@@ -87,7 +81,7 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
     """add all features to KBA dataframe to create gold dataframe"""
 
     # First load KBA data
-    kba_df = pd.read_parquet(config.kba_data_path, engine="fastparquet")
+    kba_df = pd.read_parquet(config.kba_data_path, engine="pyarrow")
 
     kba_df = apply_timeseries_cleaning(kba_df)
 
@@ -99,7 +93,7 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
     df_gold = kba_df[columns_to_keep].copy()
 
     if config.include_employment_level:
-        employment_level_df = pd.read_parquet(config.employment_level_path, engine="fastparquet")
+        employment_level_df = pd.read_parquet(config.employment_level_path, engine="pyarrow")
         employment_level_df = employment_level_df.drop(
             columns=config.employment_level_cols_to_drop
         )
@@ -112,7 +106,7 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
 
     if config.include_consumer_price_index:
         consumer_price_index_df = pd.read_parquet(
-            config.consumer_price_index_path, engine="fastparquet"
+            config.consumer_price_index_path, engine="pyarrow"
         )
         consumer_price_index_df = consumer_price_index_df.drop(
             columns=config.consumer_price_index_cols_to_drop
@@ -126,7 +120,7 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
 
     if config.include_historical_deposit_rates:
         deposit_rates_df = pd.read_parquet(
-            config.historical_deposit_rates_path, engine="fastparquet"
+            config.historical_deposit_rates_path, engine="pyarrow"
         )
         deposit_rates_df = deposit_rates_df.drop(
             columns=config.historical_deposit_rates_cols_to_drop
@@ -135,19 +129,9 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
 
         validate_no_missing_values(df_gold, config.historical_deposit_rates_path)
 
-    if config.include_employment_level_germany:
-        employment_level_germany_df = pd.read_parquet(
-            config.employment_level_germany_path, engine="fastparquet"
-        )
-        employment_level_germany_df = employment_level_germany_df.drop(
-            columns=config.employment_level_cols_to_drop
-        )
-        df_gold = df_gold.merge(employment_level_germany_df, on="Date", how="left")
-
-        validate_no_missing_values(df_gold, config.employment_level_germany_path)
 
     if config.include_gdp_germany:
-        gdp_germany_df = pd.read_parquet(config.gdp_germany_path, engine="fastparquet")
+        gdp_germany_df = pd.read_parquet(config.gdp_germany_path, engine="pyarrow")
         gdp_germany_df = gdp_germany_df.drop(columns=config.gdp_germany_cols_to_drop)
         df_gold = df_gold.merge(gdp_germany_df, on="Date", how="left")
 
@@ -155,14 +139,14 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
 
     if config.include_historical_lending_rate:
         lending_rate_df = pd.read_parquet(
-            config.historical_lending_rate_path, engine="fastparquet"
+            config.historical_lending_rate_path, engine="pyarrow"
         )
         df_gold = df_gold.merge(lending_rate_df, on="Date", how="left")
 
         validate_no_missing_values(df_gold, config.historical_lending_rate_path)
 
     if config.include_historical_oil_prices:
-        oil_prices_df = pd.read_parquet(config.historical_oil_prices_path, engine="fastparquet")
+        oil_prices_df = pd.read_parquet(config.historical_oil_prices_path, engine="pyarrow")
         df_gold = df_gold.merge(oil_prices_df, on="Date", how="left")
 
         validate_no_missing_values(df_gold, config.historical_oil_prices_path)
@@ -197,5 +181,5 @@ if __name__ == "__main__":
     output_path = os.path.join(
         os.getcwd(), "data/gold", "monthly_registration_volume_gold.parquet"
     )
-    df_gold.to_parquet(output_path, engine="fastparquet", index=False)
+    df_gold.to_parquet(output_path, engine="pyarrow", index=False)
     print(f"Gold DataFrame saved to {output_path}")

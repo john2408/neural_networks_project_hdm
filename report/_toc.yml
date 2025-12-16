@@ -1,0 +1,9 @@
+# Table of contents
+# Learn more at https://jupyterbook.org/customize/toc.html
+
+format: jb-book
+root: 0_0_Problem_Description
+parts:
+- caption: Data Analysis
+  chapters: 
+  - file: 1_1_Data_Analysis

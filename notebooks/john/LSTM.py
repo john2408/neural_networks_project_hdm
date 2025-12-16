@@ -239,7 +239,7 @@ if __name__ == "__main__":
     # Load data
     import os
     cwd = os.getcwd()
-    full_path = os.path.join(cwd, "data", "processed", "monthly_registration_volume_gold.parquet")
+    full_path = os.path.join(cwd, "data", "gold", "monthly_registration_volume_gold.parquet")
     output_path = os.path.join(cwd, "models", "lstm")
     os.makedirs(output_path, exist_ok=True)
 

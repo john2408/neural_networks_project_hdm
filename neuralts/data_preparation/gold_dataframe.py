@@ -195,7 +195,7 @@ if __name__ == "__main__":
     df_gold = create_gold_dataframe(config)
 
     output_path = os.path.join(
-        os.getcwd(), "data/processed", "monthly_registration_volume_gold.parquet"
+        os.getcwd(), "data/gold", "monthly_registration_volume_gold.parquet"
     )
     df_gold.to_parquet(output_path, engine="fastparquet", index=False)
     print(f"Gold DataFrame saved to {output_path}")

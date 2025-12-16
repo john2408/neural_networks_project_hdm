@@ -19,7 +19,7 @@ print(f"Using device: {device}")
 
 # Load data
 cwd = os.getcwd()
-full_path = os.path.join(cwd, "data", "processed", "monthly_registration_volume_gold.parquet")
+full_path = os.path.join(cwd, "data", "gold", "monthly_registration_volume_gold.parquet")
 df = pd.read_parquet(full_path, engine='fastparquet')
 df['Year'] = df['Date'].dt.year
 df['Month'] = df['Date'].dt.month

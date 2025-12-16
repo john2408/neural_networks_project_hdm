@@ -4,6 +4,23 @@
 format: jb-book
 root: 0_0_Problem_Description
 parts:
+- caption: Data Acquisition
+  chapters: 
+  - file: 1_1_Data_Sources
 - caption: Data Analysis
   chapters: 
-  - file: 1_1_Data_Analysis
+  - file: 2_1_Data_Analysis
+- caption: Modeling
+  chapters:
+  - file: 3_1_RNN_Model
+  - file: 3_2_LSTM_Model
+  - file: 3_3_GRU_Model
+  - file: 3_4_NBEATSx_Model
+  - file: 3_5_TFT_Model
+  - file: 3_6_NHITS_Model
+  - file: 3_7_Chronos_Model
+  - file: 3_8_TimesFM_Model
+  - file: 3_9_Comparison_of_Models
+- caption: Results and Conclusion
+  chapters:
+  - file: 4_1_Results_and_Conclusion

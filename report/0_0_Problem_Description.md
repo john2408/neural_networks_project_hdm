@@ -27,8 +27,17 @@ The challenge lies in forecasting monthly vehicle registration volumes for **1,5
 
 ### Forecasting Objective
 
-Generate accurate **3-month ahead forecasts** (horizon: August, September, October 2025) for all vehicle registration time series. The forecasts will support:
+### Forecasting Objective
 
+Generate accurate multi-horizon forecasts across three distinct test periods to ensure robust model validation and avoid overfitting:
+
+- **Test Period 1:** October – December 2024
+- **Test Period 2:** January – March 2025
+- **Test Period 3:** August – October 2025
+
+Each model is trained exclusively on data preceding its respective test period, enabling evaluation across varying market conditions. Performance metrics are averaged across all three folds to establish true model performance.
+
+**Use Cases:**
 - **Production Planning:** Optimizing manufacturing schedules and inventory management
 - **Market Analysis:** Identifying growth opportunities and declining segments
 - **Strategic Decision-Making:** Informing investment in powertrain technologies

@@ -174,6 +174,8 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
         df_gold.shape[0] == kba_df.shape[0]
     ), "Row count mismatch after merging features. Please check the merge operations."
 
+    # Sort by ts_key and Date
+    df_gold = df_gold.sort_values(by=["ts_key", "Date"]).reset_index(drop=True)
 
     return df_gold
 

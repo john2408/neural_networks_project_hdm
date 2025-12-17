@@ -11,19 +11,26 @@ import matplotlib.pyplot as plt
 warnings.filterwarnings('ignore')
 
 
-# Parameters 
+# ============================================================================
+# PREDICTION CONFIGURATION
+# ============================================================================
+PREDICTION_START_DATE = '2025-07-01'  # First month to predict (Jul 2025)
+PREDICTION_HORIZON = 3                # Number of months to forecast (Jul, Aug, Sep)
+PREDICTION_MONTHS_LABEL = 'Jul-Sep 2025'  # Label for visualization
+
+# Model Parameters
 SEQ_LENGTH = 8
 EMBARGO = 1
 device = torch.device('mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
+print(f"Prediction period: {PREDICTION_START_DATE} for {PREDICTION_HORIZON} months ({PREDICTION_MONTHS_LABEL})")
 
 # Load data
 cwd = os.getcwd()
 full_path = os.path.join(cwd, "data", "gold", "monthly_registration_volume_gold.parquet")
-df = pd.read_parquet(full_path, engine='fastparquet')
+df = pd.read_parquet(full_path, engine='pyarrow')
 df['Year'] = df['Date'].dt.year
 df['Month'] = df['Date'].dt.month
-# Ensure Date is datetime
 df['Date'] = pd.to_datetime(df['Date'])
 
 # Get feature columns (same as training)
@@ -69,7 +76,7 @@ print("✓ Model loaded successfully")
 # Filter time series for prediction
 ts_keys_samples = df[df['ts_key'].str.contains('A-KLASSE', case=False, na=False)]['ts_key'].unique()[:10]
 print(f"\nFound {len(ts_keys_samples)} time series to predict")
-print(f"Target months: Aug 2025, Sep 2025, Oct 2025")
+print(f"Target months: {PREDICTION_MONTHS_LABEL}")
 
 # Prepare to store predictions
 predictions_data = []
@@ -80,11 +87,11 @@ for ts_key in ts_keys_samples:
     # Get historical data for this time series
     ts_data = df[df['ts_key'] == ts_key].sort_values('Date').copy()
 
-    # Only use data before Aug 2025
-    ts_data = ts_data[ts_data['Date'] < '2025-08-01'].copy()
+    # Only use data before the prediction start date
+    ts_data = ts_data[ts_data['Date'] < PREDICTION_START_DATE].copy()
     
     if len(ts_data) < SEQ_LENGTH:
-        print(f"Skipping - insufficient data ({len(ts_data)} < {SEQ_LENGTH})")
+        print(f"  ⚠️  Skipping - insufficient data ({len(ts_data)} < {SEQ_LENGTH})")
         continue
     
     # Get the last SEQ_LENGTH observations as the initial window
@@ -92,7 +99,7 @@ for ts_key in ts_keys_samples:
     
     # Get ts_key encoding
     if ts_key not in ts_key_to_idx:
-        print(f"Skipping - ts_key not in training vocabulary")
+        print(f"  ⚠️  Skipping - ts_key not in training vocabulary")
         continue
     
     ts_key_idx = ts_key_to_idx[ts_key]
@@ -113,7 +120,7 @@ for ts_key in ts_keys_samples:
     
     predictions_for_series = []
     
-    for month_ahead in range(1, 4):  # Aug, Sep, Oct 2025
+    for month_ahead in range(1, PREDICTION_HORIZON + 1):
         # Prepare input features for the sequence
         window_features = []
         
@@ -158,9 +165,9 @@ for ts_key in ts_keys_samples:
         # Inverse transform to original scale
         pred_original = scaler_y.inverse_transform(pred_scaled)[0][0]
         
-        # Generate next date
+        # Generate next date (first day of the next month for clarity)
         last_date = pd.Timestamp(current_window['dates'][-1])
-        next_date = last_date + pd.DateOffset(months=1)
+        next_date = (last_date + pd.DateOffset(months=1)).replace(day=1)
         
         print(f"  {next_date.strftime('%b %Y')}: {pred_original:.0f}")
         
@@ -243,7 +250,7 @@ for idx, ts_key in enumerate(sample_series):
         # Predictions
         ax.plot(preds['Date'], preds['Predicted_Value'], 
                 marker='D', linewidth=2.5, markersize=8,
-                label='LSTM Predictions (Aug-Oct 2025)', color='#d62728', 
+                label=f'LSTM Predictions ({PREDICTION_MONTHS_LABEL})', color='#d62728', 
                 linestyle='--', alpha=0.9)
         
         # Add value labels
@@ -274,6 +281,12 @@ for idx, ts_key in enumerate(sample_series):
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
     ax.tick_params(axis='x', rotation=45, labelsize=10)
     ax.tick_params(axis='y', labelsize=10)
+    
+    # Set x-axis limits to prevent showing October
+    if len(preds) > 0:
+        # Ensure x-axis ends at the last prediction date, not beyond
+        max_date = preds['Date'].max()
+        ax.set_xlim(right=max_date + pd.DateOffset(days=15))  # Add small buffer but not a full month
 
 plt.tight_layout(pad=2.0)
 viz_file = os.path.join(output_path, 'predictions_visualization.png')

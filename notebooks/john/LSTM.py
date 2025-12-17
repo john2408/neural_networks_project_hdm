@@ -243,7 +243,7 @@ if __name__ == "__main__":
     output_path = os.path.join(cwd, "models", "lstm")
     os.makedirs(output_path, exist_ok=True)
 
-    df = pd.read_parquet(full_path, engine='fastparquet')
+    df = pd.read_parquet(full_path, engine='pyarrow')
     df['Year'] = df['Date'].dt.year
     df['Month'] = df['Date'].dt.month
 

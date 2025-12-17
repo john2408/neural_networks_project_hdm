@@ -14,7 +14,7 @@ The challenge lies in forecasting monthly vehicle registration volumes for **1,5
 
 - **Temporal Coverage:** January 2018 – October 2025 (monthly observations)
 - **Total Data Points:** 107,922 observations
-- **Average Series Length:** ~62 months per time series
+- **Average Series Length:** ~93 months per time series
 - **Granularity:** Model-level registrations per powertrain type (e.g., BMW X1 Electric, Mercedes A-Class Diesel)
 
 ### Key Challenges
@@ -25,7 +25,6 @@ The challenge lies in forecasting monthly vehicle registration volumes for **1,5
 4. **Data Sparsity:** Some model-powertrain combinations have limited historical data
 5. **Structural Breaks:** COVID-19 pandemic effects, semiconductor shortages, and regulatory changes
 
-### Forecasting Objective
 
 ### Forecasting Objective
 

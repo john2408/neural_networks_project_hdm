@@ -1,5 +1,6 @@
 # Loads file in the location
 # data/raw/statistisches_bundesamt/consumer_price_index.xlsx
+# Source: https://www-genesis.destatis.de/datenbank/online/statistic/61111/table/61111-0002
 
 import os
 import warnings

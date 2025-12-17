@@ -4,9 +4,9 @@
 format: jb-book
 root: 0_0_Problem_Description
 parts:
-- caption: Data Acquisition
+- caption: Data Description
   chapters: 
-  - file: 1_1_Data_Sources
+  - file: 1_1_KBA_Registration_Data
 - caption: Data Analysis
   chapters: 
   - file: 2_1_Data_Analysis

@@ -63,6 +63,8 @@ def apply_timeseries_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     # Do not include timeseries which have the last 12 months as zero values
     recent_12_months = df['Date'].max() - pd.DateOffset(months=12)
     recent_data = df[df['Date'] > recent_12_months]
+
+    # Remove ts_keys with all zero values in the last 12 months
     zero_value_ts_keys = recent_data.groupby('ts_key')['Value'].sum()
     zero_value_ts_keys = zero_value_ts_keys[zero_value_ts_keys == 0].index
     df = df[~df['ts_key'].isin(zero_value_ts_keys)].copy()
@@ -71,6 +73,12 @@ def apply_timeseries_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     max_date = df['Date'].max()
     ts_keys_with_max_date = df[df['Date'] == max_date]['ts_key'].unique()
     df = df[df['ts_key'].isin(ts_keys_with_max_date)].copy()
+
+    # Limit data to < 31.10.2025, since most features are only available up to Sep 2025
+    df = df[df["Date"] < "2025-10-31"].copy()
+
+    # All negative values are set to zero
+    df.loc[df["Value"] < 0, "Value"] = 0
 
     print("Final shape after cleaning:", df.shape)
     print("Final number of unique ts_keys:", df['ts_key'].nunique())
@@ -85,8 +93,7 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
 
     kba_df = apply_timeseries_cleaning(kba_df)
 
-    # Limit data to < 31.10.2025, since most features are only available up to Sep 2025
-    kba_df = kba_df[kba_df["Date"] < "2025-10-31"].copy()
+    
 
     columns_to_keep = ["Date", "ts_key", "Value"]
 
@@ -151,9 +158,6 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
 
         validate_no_missing_values(df_gold, config.historical_oil_prices_path)
 
-    assert (
-        df_gold.shape[0] == kba_df.shape[0]
-    ), "Row count mismatch after merging features. Please check the merge operations."
 
 
     # Fill infity values with interpolation of neughboring values
@@ -166,7 +170,10 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
     
     validate_no_missing_values(df_gold, "None")
 
-    
+    assert (
+        df_gold.shape[0] == kba_df.shape[0]
+    ), "Row count mismatch after merging features. Please check the merge operations."
+
 
     return df_gold
 

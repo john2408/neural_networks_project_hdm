@@ -1,0 +1,206 @@
+﻿Tabelle: 12211-0003
+Population, persons in employment, unemployed persons, econ.;;;;;;;
+active population, econ. inactive pop. from prim. res. hh.:;;;;;;;
+Germany, years, sex, size classes pers. monthly net income;;;;;;;
+Microcensus;;;;;;;;;;;;
+Germany;;;;;;;;;;;;
+;;;Population in primary residence households;;Persons in employment from primary residence hh.;;Unemployed persons from primary residence hh.;;Economically active population from prim.resid.hh.;;Economically inactive population fr.prim.resid.hh.;
+;;;1000;1000;1000;1000;1000;1000;1000;1000;1000;1000
+2020;Male;No income;5548;e;64;e;96;e;160;e;5388;e
+;;Less than EUR 500;3620;e;708;e;230;e;938;e;2682;e
+;;EUR 500 to less than EUR 1000;3893;e;1613;e;344;e;1957;e;1935;e
+;;EUR 1000 to less than EUR 1250;2518;e;1066;e;97;e;1163;e;1356;e
+;;EUR 1250 to less than EUR 1500;2771;e;1471;e;58;e;1529;e;1242;e
+;;EUR 1500 to less than EUR 1750;3014;e;1879;e;42;e;1921;e;1092;e
+;;EUR 1750 to less than EUR 2000;3264;e;2310;e;30;e;2340;e;924;e
+;;EUR 2000 to less than EUR 2500;5747;e;4488;e;39;e;4527;e;1220;e
+;;EUR 2500 to less than EUR 3000;3327;e;2714;e;19;e;2732;e;595;e
+;;EUR 3000 to less than EUR 3500;2254;e;1847;e;/;;1853;e;400;e
+;;EUR 3500 or more;4398;e;3846;e;/;;3856;e;543;e
+;;Not specified;292;e;136;e;/;;144;e;148;e
+;;Total;40646;e;22141;e;980;e;23121;e;17525;e
+;Female;No income;6541;e;106;e;103;e;209;e;6333;e
+;;Less than EUR 500;6103;e;1723;e;170;e;1893;e;4210;e
+;;EUR 500 to less than EUR 1000;7346;e;3191;e;243;e;3434;e;3912;e
+;;EUR 1000 to less than EUR 1250;4401;e;2347;e;71;e;2418;e;1983;e
+;;EUR 1250 to less than EUR 1500;3555;e;2120;e;40;e;2161;e;1395;e
+;;EUR 1500 to less than EUR 1750;3058;e;1970;e;23;e;1993;e;1065;e
+;;EUR 1750 to less than EUR 2000;2669;e;1903;e;14;();1917;e;751;e
+;;EUR 2000 to less than EUR 2500;3683;e;2838;e;16;();2855;e;828;e
+;;EUR 2500 to less than EUR 3000;1700;e;1330;e;/;;1335;e;365;e
+;;EUR 3000 to less than EUR 3500;974;e;793;e;/;;795;e;178;e
+;;EUR 3500 or more;1200;e;999;e;/;;1002;e;199;e
+;;Not specified;297;e;100;e;/;;106;e;190;e
+;;Total;41528;e;19421;e;697;e;20118;e;21410;e
+;Total;No income;12089;e;170;e;199;e;369;e;11720;e
+;;Less than EUR 500;9723;e;2431;e;400;e;2831;e;6892;e
+;;EUR 500 to less than EUR 1000;11239;e;4804;e;588;e;5391;e;5848;e
+;;EUR 1000 to less than EUR 1250;6919;e;3413;e;168;e;3581;e;3338;e
+;;EUR 1250 to less than EUR 1500;6326;e;3591;e;98;e;3689;e;2637;e
+;;EUR 1500 to less than EUR 1750;6072;e;3849;e;66;e;3915;e;2157;e
+;;EUR 1750 to less than EUR 2000;5933;e;4213;e;44;e;4257;e;1676;e
+;;EUR 2000 to less than EUR 2500;9430;e;7327;e;56;e;7382;e;2048;e
+;;EUR 2500 to less than EUR 3000;5027;e;4043;e;23;e;4067;e;960;e
+;;EUR 3000 to less than EUR 3500;3227;e;2641;e;/;;2649;e;579;e
+;;EUR 3500 or more;5599;e;4845;e;12;();4858;e;741;e
+;;Not specified;589;e;235;e;15;();251;e;338;e
+;;Total;82175;e;41562;e;1677;e;43239;e;38935;e
+2021;Male;No income;5919;e;67;e;90;e;156;e;5762;e
+;;Less than EUR 500;3130;e;686;e;187;e;873;e;2257;e
+;;EUR 500 to less than EUR 1000;3687;e;1484;e;287;e;1771;e;1916;e
+;;EUR 1000 to less than EUR 1250;2456;e;1031;e;84;e;1115;e;1342;e
+;;EUR 1250 to less than EUR 1500;2620;e;1367;e;57;e;1424;e;1196;e
+;;EUR 1500 to less than EUR 1750;2915;e;1786;e;42;e;1828;e;1087;e
+;;EUR 1750 to less than EUR 2000;3131;e;2219;e;37;e;2256;e;875;e
+;;EUR 2000 to less than EUR 2500;5758;e;4455;e;50;e;4505;e;1253;e
+;;EUR 2500 to less than EUR 3000;3344;e;2724;e;24;e;2748;e;596;e
+;;EUR 3000 to less than EUR 3500;2296;e;1893;e;9;();1902;e;395;e
+;;EUR 3500 or more;4529;e;3965;e;14;e;3978;e;551;e
+;;Not specified;247;e;126;e;8;();134;e;113;e
+;;Total;40034;e;21803;e;887;e;22690;e;17344;e
+;Female;No income;6970;e;113;e;104;e;217;e;6753;e
+;;Less than EUR 500;5324;e;1642;e;131;e;1773;e;3551;e
+;;EUR 500 to less than EUR 1000;6991;e;2959;e;215;e;3173;e;3818;e
+;;EUR 1000 to less than EUR 1250;4304;e;2212;e;66;e;2278;e;2026;e
+;;EUR 1250 to less than EUR 1500;3440;e;2046;e;35;e;2082;e;1359;e
+;;EUR 1500 to less than EUR 1750;3038;e;1920;e;26;e;1946;e;1092;e
+;;EUR 1750 to less than EUR 2000;2656;e;1868;e;18;e;1886;e;769;e
+;;EUR 2000 to less than EUR 2500;3874;e;2970;e;19;e;2989;e;884;e
+;;EUR 2500 to less than EUR 3000;1791;e;1416;e;/;;1423;e;368;e
+;;EUR 3000 to less than EUR 3500;1049;e;846;e;/;;848;e;200;e
+;;EUR 3500 or more;1332;e;1123;e;/;;1127;e;205;e
+;;Not specified;233;e;89;e;/;;93;e;140;e
+;;Total;41001;e;19205;e;630;e;19835;e;21166;e
+;Total;No income;12889;e;180;e;193;e;373;e;12515;e
+;;Less than EUR 500;8455;e;2328;e;318;e;2646;e;5809;e
+;;EUR 500 to less than EUR 1000;10678;e;4443;e;501;e;4944;e;5734;e
+;;EUR 1000 to less than EUR 1250;6761;e;3243;e;150;e;3393;e;3368;e
+;;EUR 1250 to less than EUR 1500;6061;e;3413;e;93;e;3506;e;2555;e
+;;EUR 1500 to less than EUR 1750;5953;e;3705;e;69;e;3774;e;2179;e
+;;EUR 1750 to less than EUR 2000;5787;e;4087;e;55;e;4143;e;1644;e
+;;EUR 2000 to less than EUR 2500;9632;e;7425;e;69;e;7494;e;2138;e
+;;EUR 2500 to less than EUR 3000;5135;e;4140;e;31;e;4171;e;964;e
+;;EUR 3000 to less than EUR 3500;3345;e;2739;e;11;e;2750;e;595;e
+;;EUR 3500 or more;5861;e;5088;e;17;e;5105;e;756;e
+;;Not specified;480;e;216;e;11;();227;e;253;e
+;;Total;81035;e;41008;e;1518;e;42525;e;38510;e
+2022;Male;No income;5894;e;66;e;92;e;157;e;5736;e
+;;Less than EUR 500;3179;e;639;e;161;e;799;e;2380;e
+;;EUR 500 to less than EUR 1000;3560;e;1451;e;256;e;1707;e;1853;e
+;;EUR 1000 to less than EUR 1250;2337;e;946;e;66;e;1012;e;1325;e
+;;EUR 1250 to less than EUR 1500;2489;e;1241;e;47;e;1288;e;1201;e
+;;EUR 1500 to less than EUR 1750;2849;e;1729;e;36;e;1765;e;1084;e
+;;EUR 1750 to less than EUR 2000;3152;e;2233;e;30;e;2263;e;889;e
+;;EUR 2000 to less than EUR 2500;6083;e;4784;e;47;e;4830;e;1253;e
+;;EUR 2500 to less than EUR 3000;3580;e;2941;e;19;e;2960;e;619;e
+;;EUR 3000 to less than EUR 3500;2437;e;2024;e;7;();2031;e;405;e
+;;EUR 3500 or more;4840;e;4269;e;13;e;4283;e;558;e
+;;Not specified;/;;/;;/;;/;;/;
+;;Total;40399;e;22322;e;774;e;23096;e;17304;e
+;Female;No income;6843;e;103;e;104;e;207;e;6636;e
+;;Less than EUR 500;5378;e;1586;e;126;e;1711;e;3666;e
+;;EUR 500 to less than EUR 1000;6706;e;2821;e;189;e;3010;e;3697;e
+;;EUR 1000 to less than EUR 1250;4251;e;2171;e;58;e;2229;e;2022;e
+;;EUR 1250 to less than EUR 1500;3477;e;2045;e;36;e;2081;e;1396;e
+;;EUR 1500 to less than EUR 1750;3159;e;2004;e;21;e;2024;e;1135;e
+;;EUR 1750 to less than EUR 2000;2803;e;1953;e;15;e;1969;e;834;e
+;;EUR 2000 to less than EUR 2500;4231;e;3244;e;22;e;3266;e;965;e
+;;EUR 2500 to less than EUR 3000;1977;e;1572;e;7;();1579;e;398;e
+;;EUR 3000 to less than EUR 3500;1135;e;930;e;/;;931;e;204;e
+;;EUR 3500 or more;1494;e;1264;e;/;;1268;e;225;e
+;;Not specified;/;;/;;/;;/;;/;
+;;Total;41453;e;19693;e;583;e;20275;e;21178;e
+;Total;No income;12737;e;168;e;196;e;364;e;12373;e
+;;Less than EUR 500;8556;e;2224;e;286;e;2511;e;6046;e
+;;EUR 500 to less than EUR 1000;10266;e;4272;e;444;e;4717;e;5549;e
+;;EUR 1000 to less than EUR 1250;6588;e;3117;e;124;e;3241;e;3347;e
+;;EUR 1250 to less than EUR 1500;5966;e;3287;e;83;e;3369;e;2597;e
+;;EUR 1500 to less than EUR 1750;6008;e;3733;e;57;e;3789;e;2219;e
+;;EUR 1750 to less than EUR 2000;5955;e;4186;e;46;e;4232;e;1723;e
+;;EUR 2000 to less than EUR 2500;10314;e;8028;e;69;e;8096;e;2217;e
+;;EUR 2500 to less than EUR 3000;5556;e;4513;e;26;e;4539;e;1017;e
+;;EUR 3000 to less than EUR 3500;3571;e;2954;e;8;();2962;e;609;e
+;;EUR 3500 or more;6334;e;5533;e;18;e;5551;e;783;e
+;;Not specified;/;;/;;/;;/;;/;
+;;Total;81852;e;42015;e;1356;e;43371;e;38481;e
+2023;Male;No income;6912;e;93;e;114;e;206;e;6706;e
+;;Less than EUR 500;1973;e;483;e;114;e;597;e;1376;e
+;;EUR 500 to less than EUR 1000;3549;e;1438;e;271;e;1709;e;1840;e
+;;EUR 1000 to less than EUR 1250;2184;e;829;e;89;e;918;e;1267;e
+;;EUR 1250 to less than EUR 1500;2196;e;1002;e;42;e;1044;e;1152;e
+;;EUR 1500 to less than EUR 1750;2629;e;1524;e;36;e;1560;e;1070;e
+;;EUR 1750 to less than EUR 2000;3069;e;2131;e;26;e;2158;e;911;e
+;;EUR 2000 to less than EUR 2500;6313;e;4909;e;35;e;4944;e;1369;e
+;;EUR 2500 to less than EUR 3000;3815;e;3153;e;17;e;3170;e;645;e
+;;EUR 3000 to less than EUR 3500;2645;e;2194;e;9;();2203;e;442;e
+;;EUR 3500 or more;5429;e;4799;e;12;e;4811;e;618;e
+;;Not specified;10;e;10;e;/;;10;e;/;
+;;Total;40726;e;22566;e;764;e;23329;e;17396;e
+;Female;No income;7997;e;128;e;124;e;252;e;7745;e
+;;Less than EUR 500;3526;e;1127;e;81;e;1208;e;2318;e
+;;EUR 500 to less than EUR 1000;6493;e;2724;e;197;e;2920;e;3573;e
+;;EUR 1000 to less than EUR 1250;4190;e;2044;e;63;e;2107;e;2083;e
+;;EUR 1250 to less than EUR 1500;3382;e;1928;e;37;e;1965;e;1417;e
+;;EUR 1500 to less than EUR 1750;3180;e;1996;e;24;e;2020;e;1161;e
+;;EUR 1750 to less than EUR 2000;2925;e;2010;e;18;e;2028;e;897;e
+;;EUR 2000 to less than EUR 2500;4666;e;3542;e;20;e;3562;e;1104;e
+;;EUR 2500 to less than EUR 3000;2261;e;1828;e;8;();1835;e;426;e
+;;EUR 3000 to less than EUR 3500;1339;e;1101;e;/;;1104;e;235;e
+;;EUR 3500 or more;1782;e;1530;e;/;;1533;e;248;e
+;;Not specified;/;;/;;/;;/;;/;
+;;Total;41746;e;19962;e;578;e;20539;e;21206;e
+;Total;No income;14910;e;221;e;237;e;459;e;14451;e
+;;Less than EUR 500;5498;e;1610;e;195;e;1805;e;3693;e
+;;EUR 500 to less than EUR 1000;10043;e;4162;e;467;e;4629;e;5414;e
+;;EUR 1000 to less than EUR 1250;6375;e;2873;e;152;e;3025;e;3350;e
+;;EUR 1250 to less than EUR 1500;5578;e;2930;e;79;e;3009;e;2569;e
+;;EUR 1500 to less than EUR 1750;5810;e;3520;e;59;e;3579;e;2231;e
+;;EUR 1750 to less than EUR 2000;5994;e;4141;e;44;e;4186;e;1808;e
+;;EUR 2000 to less than EUR 2500;10979;e;8451;e;55;e;8506;e;2473;e
+;;EUR 2500 to less than EUR 3000;6076;e;4981;e;25;e;5005;e;1071;e
+;;EUR 3000 to less than EUR 3500;3984;e;3296;e;12;e;3307;e;677;e
+;;EUR 3500 or more;7211;e;6329;e;15;e;6344;e;866;e
+;;Not specified;13;e;13;e;/;;13;e;/;
+;;Total;82472;e;42527;e;1341;e;43869;e;38603;e
+2024;Male;No income;6982;p;106;p;128;p;234;p;6748;p
+;;Less than EUR 500;1785;p;452;p;90;p;542;p;1243;p
+;;EUR 500 to less than EUR 1000;3371;p;1342;p;280;p;1622;p;1749;p
+;;EUR 1000 to less than EUR 1250;2190;p;824;p;112;p;935;p;1254;p
+;;EUR 1250 to less than EUR 1500;2036;p;853;p;58;p;910;p;1125;p
+;;EUR 1500 to less than EUR 1750;2459;p;1328;p;43;p;1371;p;1088;p
+;;EUR 1750 to less than EUR 2000;2870;p;1907;p;33;p;1939;p;931;p
+;;EUR 2000 to less than EUR 2500;6122;p;4667;p;50;p;4717;p;1405;p
+;;EUR 2500 to less than EUR 3000;4128;p;3384;p;23;p;3407;p;720;p
+;;EUR 3000 to less than EUR 3500;2919;p;2433;p;10;();2443;p;476;p
+;;EUR 3500 or more;6052;p;5367;p;14;p;5381;p;671;p
+;;Not specified;10;();10;();/;;10;();/;
+;;Total;40922;p;22671;p;841;p;23512;p;17410;p
+;Female;No income;7987;p;129;p;144;p;273;p;7714;p
+;;Less than EUR 500;3156;p;981;p;80;p;1060;p;2096;p
+;;EUR 500 to less than EUR 1000;6057;p;2479;p;207;p;2686;p;3371;p
+;;EUR 1000 to less than EUR 1250;4138;p;1954;p;79;p;2033;p;2105;p
+;;EUR 1250 to less than EUR 1500;3375;p;1841;p;44;p;1885;p;1490;p
+;;EUR 1500 to less than EUR 1750;3139;p;1911;p;31;p;1943;p;1197;p
+;;EUR 1750 to less than EUR 2000;2919;p;1958;p;19;p;1977;p;942;p
+;;EUR 2000 to less than EUR 2500;4826;p;3612;p;27;p;3639;p;1187;p
+;;EUR 2500 to less than EUR 3000;2615;p;2116;p;10;();2126;p;490;p
+;;EUR 3000 to less than EUR 3500;1559;p;1285;p;/;;1289;p;270;p
+;;EUR 3500 or more;2073;p;1798;p;/;;1802;p;270;p
+;;Not specified;/;;/;;/;;/;;/;
+;;Total;41847;p;20067;p;649;p;20716;p;21131;p
+;Total;No income;14969;p;234;p;272;p;507;p;14462;p
+;;Less than EUR 500;4941;p;1433;p;169;p;1602;p;3338;p
+;;EUR 500 to less than EUR 1000;9428;p;3821;p;487;p;4308;p;5120;p
+;;EUR 1000 to less than EUR 1250;6328;p;2778;p;191;p;2969;p;3359;p
+;;EUR 1250 to less than EUR 1500;5411;p;2694;p;101;p;2795;p;2616;p
+;;EUR 1500 to less than EUR 1750;5598;p;3239;p;75;p;3314;p;2285;p
+;;EUR 1750 to less than EUR 2000;5789;p;3865;p;51;p;3916;p;1873;p
+;;EUR 2000 to less than EUR 2500;10947;p;8279;p;77;p;8356;p;2591;p
+;;EUR 2500 to less than EUR 3000;6743;p;5500;p;33;p;5533;p;1210;p
+;;EUR 3000 to less than EUR 3500;4478;p;3718;p;14;p;3732;p;746;p
+;;EUR 3500 or more;8124;p;7165;p;19;p;7183;p;941;p
+;;Not specified;13;p;13;p;/;;13;p;/;
+;;Total;82769;p;42739;p;1489;p;44228;p;38541;p
+__________
+© Statistisches Bundesamt (Destatis), 2025
+created: 2025-11-23 / 18:33:23

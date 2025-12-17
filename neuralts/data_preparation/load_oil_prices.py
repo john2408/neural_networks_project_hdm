@@ -1,5 +1,6 @@
 # Historical Oil Prices are available from
-# https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en
+# Source: https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en
+# Load from: data/raw/european_commission/Weekly_Oil_Bulletin_Prices_History_maticni_4web.xlsx
 
 import os
 import warnings

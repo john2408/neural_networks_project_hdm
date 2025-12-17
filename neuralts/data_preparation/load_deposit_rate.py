@@ -1,5 +1,6 @@
 # Load deposit rate from
 # location: data/raw/bundesbank/ECB_deposit_facility_rate.csv
+# Source: https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/759784/759784?listId=www_szista_mb01
 
 import os
 

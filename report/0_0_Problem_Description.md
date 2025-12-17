@@ -32,7 +32,7 @@ Generate accurate multi-horizon forecasts across three distinct test periods to 
 
 - **Test Period 1:** October – December 2024
 - **Test Period 2:** January – March 2025
-- **Test Period 3:** August – October 2025
+- **Test Period 3:** July – September 2025
 
 Each model is trained exclusively on data preceding its respective test period, enabling evaluation across varying market conditions. Performance metrics are averaged across all three folds to establish true model performance.
 
@@ -93,7 +93,7 @@ The study benchmarks five state-of-the-art neural network architectures for time
 ### Evaluation Framework
 
 **Primary Metric:** **SMAPE (Symmetric Mean Absolute Percentage Error)**
-- **Forecast Horizon:** 3 months (Aug, Sep, Oct 2025)
+- **Forecast Horizon:** 3 time periods each of a three month forecast
 - **Evaluation Strategy:** Walk-forward validation with embargo periods to prevent lookahead bias
 - **Success Criteria:** Minimizing SMAPE across all 1,502 time series
 

@@ -481,7 +481,7 @@ def generate_out_of_sample_predictions(
     # STEP 1: Initialize data structures for ALL time series at once
     # -------------------------------------------------------------------------
     
-    ts_data = {}  # Store all time series data
+    ts_data = {}  # Master dictionary storing everything about each time series
     valid_ts_keys = []  # Time series with enough history
     
     for ts_key, group in df_for_prediction.groupby('ts_key'):

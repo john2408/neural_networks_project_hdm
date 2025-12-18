@@ -114,6 +114,147 @@ class RNNForecaster(nn.Module):
         return out
 
 
+class GRUForecaster(nn.Module):
+    """
+    GRU model for MULTIVARIATE time series forecasting.
+    Architecture: GRU -> Dropout -> GRU -> Dropout -> Fully Connected
+    Takes multiple input features at each timestep.
+    
+    GRU is similar to LSTM but with fewer parameters (no cell state).
+    Generally faster than LSTM while maintaining good performance.
+    Uses reset and update gates instead of LSTM's input/forget/output gates.
+    """
+    def __init__(self, input_size, hidden_size=64, num_layers=2, dropout=0.2):
+        """
+        Args:
+            input_size: Number of input features (Value + year + month + one-hot)
+            hidden_size: GRU hidden dimension
+            num_layers: Number of GRU layers
+            dropout: Dropout rate
+        """
+        super(GRUForecaster, self).__init__()
+        
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.input_size = input_size
+        
+        # GRU layers
+        self.gru = nn.GRU(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0
+        )
+        
+        # Dropout layer
+        self.dropout = nn.Dropout(dropout)
+        
+        # Fully connected output layer
+        self.fc = nn.Linear(hidden_size, 1)
+    
+    def forward(self, x):
+        # x shape: (batch_size, seq_length, input_size)
+        
+        # GRU forward pass
+        # gru_out: (batch_size, seq_length, hidden_size)
+        # h_n: (num_layers, batch_size, hidden_size)
+        gru_out, h_n = self.gru(x)
+        
+        # Take the output from the last time step
+        last_output = gru_out[:, -1, :]  # Shape: (batch_size, hidden_size)
+        
+        # Apply dropout
+        out = self.dropout(last_output)
+        
+        # Fully connected layer
+        out = self.fc(out)  # Shape: (batch_size, 1)
+        
+        return out
+
+
+class CNN1DForecaster(nn.Module):
+    """
+    1D CNN model for MULTIVARIATE time series forecasting.
+    Architecture: 
+        Conv1D blocks (Conv -> ReLU -> MaxPool) -> 
+        Adaptive Average Pooling -> Flatten -> 
+        Fully Connected -> Dropout -> Output
+    
+    CNNs can capture local patterns and temporal dependencies efficiently.
+    Uses multiple kernel sizes to capture patterns at different scales.
+    Processes sequences in parallel (unlike RNN/LSTM/GRU).
+    """
+    def __init__(self, input_size, hidden_size=64, num_layers=3, dropout=0.2):
+        """
+        Args:
+            input_size: Number of input features (Value + year + month + one-hot)
+            hidden_size: Number of filters in conv layers
+            num_layers: Number of convolutional blocks (minimum 1)
+            dropout: Dropout rate
+        """
+        super(CNN1DForecaster, self).__init__()
+        
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = max(1, num_layers)
+        
+        # Convolutional layers
+        conv_layers = []
+        
+        # First conv block: input_size -> hidden_size
+        conv_layers.extend([
+            nn.Conv1d(in_channels=input_size, out_channels=hidden_size, 
+                     kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.MaxPool1d(kernel_size=2, stride=1, padding=1)
+        ])
+        
+        # Additional conv blocks: hidden_size -> hidden_size
+        for i in range(1, self.num_layers):
+            conv_layers.extend([
+                nn.Conv1d(in_channels=hidden_size, out_channels=hidden_size, 
+                         kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.MaxPool1d(kernel_size=2, stride=1, padding=1)
+            ])
+        
+        self.conv_blocks = nn.Sequential(*conv_layers)
+        
+        # Adaptive pooling to fixed size output
+        self.adaptive_pool = nn.AdaptiveAvgPool1d(1)
+        
+        # Fully connected layers
+        self.fc1 = nn.Linear(hidden_size, hidden_size)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+        self.fc2 = nn.Linear(hidden_size, 1)
+    
+    def forward(self, x):
+        # x shape: (batch_size, seq_length, input_size)
+        
+        # Conv1d expects (batch_size, channels, seq_length)
+        # Transpose from (batch, seq, features) to (batch, features, seq)
+        x = x.transpose(1, 2)  # (batch_size, input_size, seq_length)
+        
+        # Apply convolutional blocks
+        x = self.conv_blocks(x)  # (batch_size, hidden_size, seq_length')
+        
+        # Adaptive pooling to reduce to (batch_size, hidden_size, 1)
+        x = self.adaptive_pool(x)  # (batch_size, hidden_size, 1)
+        
+        # Flatten
+        x = x.squeeze(-1)  # (batch_size, hidden_size)
+        
+        # Fully connected layers
+        x = self.fc1(x)  # (batch_size, hidden_size)
+        x = self.relu(x)
+        x = self.dropout(x)
+        out = self.fc2(x)  # (batch_size, 1)
+        
+        return out
+
+
 class PositionalEncoding(nn.Module):
     """
     Positional encoding for Transformer model.

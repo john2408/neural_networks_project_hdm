@@ -5,9 +5,10 @@ import numpy as np
 import pandas as pd
 import warnings
 import time
+import argparse
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
-from neuralts.core.models import LSTMForecaster, RNNForecaster, TransformerForecaster, TransformerForecasterCLS
+from neuralts.core.models import LSTMForecaster, RNNForecaster, GRUForecaster, CNN1DForecaster, TransformerForecaster, TransformerForecasterCLS
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
 
@@ -17,20 +18,47 @@ warnings.filterwarnings('ignore')
 
 if __name__ == "__main__":
 
-
+    # ========================================================================
+    # COMMAND LINE ARGUMENTS
+    # ========================================================================
+    
+    parser = argparse.ArgumentParser(
+        description='Train neural network models for time series forecasting',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    parser.add_argument('--seq-length', type=int, default=6,
+                        help='Sequence length for time series')
+    parser.add_argument('--train-ratio', type=float, default=0.8,
+                        help='Ratio of training data in train/validation split')
+    parser.add_argument('--embargo', type=int, default=1,
+                        help='Embargo period between train and validation sets')
+    parser.add_argument('--epochs', type=int, default=25,
+                        help='Number of training epochs')
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help='Batch size for training')
+    parser.add_argument('--learning-rate', type=float, default=0.001,
+                        help='Learning rate for optimizer')
+    parser.add_argument('--weight-decay', type=float, default=1e-5,
+                        help='Weight decay for optimizer')
+    parser.add_argument('--model', type=str, default='RNN',
+                        choices=['LSTM', 'RNN', 'GRU', 'CNN1D', 'Transformer', 'TransformerCLS'],
+                        help='Model type to train')
+    
+    args = parser.parse_args()
+    
     # ========================================================================
     # TRAINING PARAMETERS
     # ========================================================================
     
-    SEQ_LENGTH = 6
-    TRAIN_RATIO = 0.8
-    EMBARGO = 1
-    EPOCHS = 25
-    BATCH_SIZE = 64
-    LEARNING_RATE = 0.001
-    WEIGHT_DECAY = 1e-5
-    MODEL = 'Transformer'  # Options: 'LSTM', 'RNN', 'Transformer', 'TransformerCLS'
-
+    SEQ_LENGTH = args.seq_length
+    TRAIN_RATIO = args.train_ratio
+    EMBARGO = args.embargo
+    EPOCHS = args.epochs
+    BATCH_SIZE = args.batch_size
+    LEARNING_RATE = args.learning_rate
+    WEIGHT_DECAY = args.weight_decay
+    MODEL = args.model
 
     # ========================================================================
 
@@ -207,6 +235,20 @@ if __name__ == "__main__":
                 input_size=INPUT_SIZE,
                 hidden_size=64,
                 num_layers=2,
+                dropout=0.2
+            ).to(device)
+        elif MODEL == 'GRU':
+            model = GRUForecaster(
+                input_size=INPUT_SIZE,
+                hidden_size=64,
+                num_layers=2,
+                dropout=0.2
+            ).to(device)
+        elif MODEL == 'CNN1D':
+            model = CNN1DForecaster(
+                input_size=INPUT_SIZE,
+                hidden_size=64,
+                num_layers=3,
                 dropout=0.2
             ).to(device)
         elif MODEL == 'Transformer':

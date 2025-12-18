@@ -249,6 +249,515 @@ class LSTMForecaster(nn.Module):
         
         return out
 
+def generate_out_of_sample_predictions_old(
+    model, 
+    df_test_period,
+    df_full, 
+    fold_config, 
+    features, 
+    scaler_X, 
+    scaler_y, 
+    ts_key_to_idx, 
+    n_ts_keys, 
+    seq_length, 
+    embargo, 
+    device
+):
+    """
+    Generate out-of-sample predictions for a test period using autoregressive forecasting.
+    
+    Args:
+        model: Trained PyTorch model
+        df_full: Complete dataframe with all data
+        fold_config: Dict with 'test_start' and 'test_end' dates
+        features: List of feature column names
+        scaler_X: Fitted StandardScaler for features
+        scaler_y: Fitted StandardScaler for target
+        ts_key_to_idx: Dict mapping ts_key to one-hot index
+        n_ts_keys: Total number of time series
+        seq_length: Lookback window size
+        embargo: Gap between last observation and prediction
+        device: torch.device (cpu/cuda/mps)
+    
+    Returns:
+        predictions_dict: Dict mapping ts_key -> list of predictions
+        actuals_dict: Dict mapping ts_key -> list of actual values
+        all_preds: Flattened array of all predictions
+        all_acts: Flattened array of all actuals
+    """
+    print("\n" + "-"*60)
+    print("STEP 3: Out-of-sample predictions")
+    print("-"*60)
+
+    
+    print(f"Test period: {fold_config['test_start']} to {fold_config['test_end']}")
+    print(f"Test observations: {len(df_test_period):,}")
+    
+    # For prediction, we need the last SEQ_LENGTH + EMBARGO observations before test period
+    # to build the initial input sequence
+    test_start_date = pd.to_datetime(fold_config['test_start'])
+    lookback_start = test_start_date - pd.DateOffset(months=seq_length + embargo)
+    
+    df_for_prediction = df_full[
+        (df_full['Date'] >= lookback_start) & 
+        (df_full['Date'] <= fold_config['test_end'])
+    ].copy()
+    
+    # Generate predictions using autoregressive approach
+    model.eval()
+    predictions_dict = {}
+    actuals_dict = {}
+    
+    # Group by time series
+    for ts_key, group in df_for_prediction.groupby('ts_key'):
+        group = group.sort_values('Date')
+        
+        # Get ts_key one-hot encoding
+        if ts_key not in ts_key_to_idx:
+            continue  # Skip if time series not seen during training
+        
+        ts_key_idx = ts_key_to_idx[ts_key]
+        ts_key_onehot = np.zeros(n_ts_keys, dtype=np.float32)
+        ts_key_onehot[ts_key_idx] = 1.0
+        
+        # Get historical data (before test period)
+        hist_data = group[group['Date'] < test_start_date]
+        
+        if len(hist_data) < seq_length + embargo:
+            continue  # Not enough history
+        
+        # Initialize with last SEQ_LENGTH + EMBARGO observations
+        recent_values = hist_data['Value'].values[-(seq_length + embargo):]
+        recent_features = hist_data[features].values[-(seq_length + embargo):]
+        recent_dates = pd.to_datetime(hist_data['Date'].values[-(seq_length + embargo):])
+        
+        # Predict for each month in test period
+        test_dates = group[group['Date'] >= test_start_date]['Date'].values
+        test_actuals = group[group['Date'] >= test_start_date]['Value'].values
+        
+        predictions_list = []
+        
+        for pred_idx, pred_date in enumerate(test_dates):
+            pred_date = pd.to_datetime(pred_date)
+            
+            # Build input sequence (last SEQ_LENGTH observations, with EMBARGO gap)
+            # If EMBARGO=1: use [t-SEQ_LENGTH-1, ..., t-2] to predict t
+            sequence = []
+            
+            for i in range(seq_length):
+                idx = len(recent_values) - seq_length - embargo + i
+                
+                if idx < 0 or idx >= len(recent_values):
+                    break
+                
+                date = pd.to_datetime(recent_dates[idx])
+                value = recent_values[idx]
+                feat = recent_features[idx]
+                
+                # Build feature vector
+                features_list = [value]
+                features_list.append(feat)
+                features_list.extend([date.year, date.month])
+                features_list.append(ts_key_onehot)
+                
+                feature_vector = np.concatenate([
+                    np.array(f).flatten() if not isinstance(f, (int, float)) else [f]
+                    for f in features_list
+                ])
+                
+                sequence.append(feature_vector)
+            
+            if len(sequence) != seq_length:
+                break
+            
+            # Scale input
+            sequence = np.array(sequence, dtype=np.float32)
+            n_continuous = 1 + len(features) + 2
+            
+            seq_continuous = sequence[:, :n_continuous]
+            seq_onehot = sequence[:, n_continuous:]
+            
+            seq_continuous_scaled = scaler_X.transform(seq_continuous)
+            sequence_scaled = np.concatenate([seq_continuous_scaled, seq_onehot], axis=1)
+            
+            # Predict
+            with torch.no_grad():
+                X_input = torch.FloatTensor(sequence_scaled).unsqueeze(0).to(device)
+                pred_scaled = model(X_input).cpu().numpy()[0, 0]
+                pred_value = scaler_y.inverse_transform([[pred_scaled]])[0, 0]
+            
+            predictions_list.append(pred_value)
+            
+            # Update history for next prediction
+            # Get actual features for this date (or carry forward last known)
+            actual_row = group[group['Date'] == pred_date]
+            if len(actual_row) > 0:
+                actual_value = actual_row['Value'].values[0]
+                actual_features = actual_row[features].values[0]
+            else:
+                actual_value = pred_value  # Fallback
+                actual_features = recent_features[-1]
+            
+            recent_values = np.append(recent_values, actual_value)
+            recent_features = np.vstack([recent_features, actual_features])
+            recent_dates = np.append(recent_dates, pred_date)
+        
+        if len(predictions_list) > 0:
+            predictions_dict[ts_key] = predictions_list
+            actuals_dict[ts_key] = test_actuals[:len(predictions_list)]
+    
+    # Flatten predictions and actuals
+    all_preds = np.concatenate([np.array(v) for v in predictions_dict.values()])
+    all_acts = np.concatenate([np.array(v) for v in actuals_dict.values()])
+    
+    print(f"Generated predictions for {len(predictions_dict)} time series")
+    print(f"Total predictions: {len(all_preds):,}")
+    
+    return predictions_dict, actuals_dict, all_preds, all_acts
+
+
+def generate_out_of_sample_predictions(
+    model, 
+    df_test_period,
+    df_full, 
+    fold_config, 
+    features, 
+    scaler_X, 
+    scaler_y, 
+    ts_key_to_idx, 
+    n_ts_keys, 
+    seq_length, 
+    embargo, 
+    device
+):
+    """
+    Generate out-of-sample predictions using BATCHED autoregressive forecasting.
+    
+    This function optimizes the prediction process by:
+    1. Batches all time series together for each prediction step
+    2. Runs ONE forward pass for all time series simultaneously
+    3. Updates all histories together
+    
+    
+    Args:
+        model: Trained PyTorch model
+        df_test_period: Test period dataframe
+        df_full: Complete dataframe with all data
+        fold_config: Dict with 'test_start' and 'test_end' dates
+        features: List of feature column names
+        scaler_X: Fitted StandardScaler for features
+        scaler_y: Fitted StandardScaler for target
+        ts_key_to_idx: Dict mapping ts_key to one-hot index
+        n_ts_keys: Total number of time series
+        seq_length: Lookback window size
+        embargo: Gap between last observation and prediction
+        device: torch.device (cpu/cuda/mps)
+    
+    Returns:
+        predictions_dict: Dict mapping ts_key -> list of predictions
+        actuals_dict: Dict mapping ts_key -> list of actual values
+        all_preds: Flattened array of all predictions
+        all_acts: Flattened array of all actuals
+    """
+    print("\n" + "-"*60)
+    print("STEP 3: Out-of-sample predictions (OPTIMIZED)")
+    print("-"*60)
+    
+    print(f"Test period: {fold_config['test_start']} to {fold_config['test_end']}")
+    print(f"Test observations: {len(df_test_period):,}")
+    
+    # Setup
+    test_start_date = pd.to_datetime(fold_config['test_start'])
+    lookback_start = test_start_date - pd.DateOffset(months=seq_length + embargo)
+    
+    df_for_prediction = df_full[
+        (df_full['Date'] >= lookback_start) & 
+        (df_full['Date'] <= fold_config['test_end'])
+    ].copy()
+    
+    model.eval()
+    
+    # -------------------------------------------------------------------------
+    # STEP 1: Initialize data structures for ALL time series at once
+    # -------------------------------------------------------------------------
+    
+    ts_data = {}  # Store all time series data
+    valid_ts_keys = []  # Time series with enough history
+    
+    for ts_key, group in df_for_prediction.groupby('ts_key'):
+        group = group.sort_values('Date')
+        
+        # Skip if not in training set
+        if ts_key not in ts_key_to_idx:
+            continue
+        
+        # Get historical data
+        hist_data = group[group['Date'] < test_start_date]
+        
+        if len(hist_data) < seq_length + embargo:
+            continue
+        
+        # Get test data
+        test_data = group[group['Date'] >= test_start_date]
+        
+        if len(test_data) == 0:
+            continue
+        
+        # Initialize time series data
+        ts_data[ts_key] = {
+            'ts_key_idx': ts_key_to_idx[ts_key],
+            'recent_values': hist_data['Value'].values[-(seq_length + embargo):].copy(),
+            'recent_features': hist_data[features].values[-(seq_length + embargo):].copy(),
+            'recent_dates': pd.to_datetime(hist_data['Date'].values[-(seq_length + embargo):]),
+            'test_dates': test_data['Date'].values,
+            'test_actuals': test_data['Value'].values,
+            'predictions': [],
+            'n_predictions': len(test_data)
+        }
+        valid_ts_keys.append(ts_key)
+    
+    if len(valid_ts_keys) == 0:
+        print("No valid time series found!")
+        return {}, {}, np.array([]), np.array([])
+    
+    print(f"Processing {len(valid_ts_keys)} time series in batched mode...")
+    
+    # -------------------------------------------------------------------------
+    # STEP 2: Determine maximum prediction horizon across all time series
+    # -------------------------------------------------------------------------
+    
+    max_horizon = max(ts_data[ts_key]['n_predictions'] for ts_key in valid_ts_keys)
+    n_continuous = 1 + len(features) + 2
+    
+    # -------------------------------------------------------------------------
+    # STEP 3: Autoregressive prediction - ONE BATCH PER TIME STEP
+    # -------------------------------------------------------------------------
+    
+    for step in range(max_horizon):
+        # Collect all time series that need prediction at this step
+        batch_ts_keys = []
+        batch_sequences = []
+        
+        for ts_key in valid_ts_keys:
+            data = ts_data[ts_key]
+            
+            # Skip if this time series has already made all its predictions
+            if step >= data['n_predictions']:
+                continue
+            
+            # Build sequence for this time series
+            sequence = []
+            ts_key_onehot = np.zeros(n_ts_keys, dtype=np.float32)
+            ts_key_onehot[data['ts_key_idx']] = 1.0
+            
+            for i in range(seq_length):
+                idx = len(data['recent_values']) - seq_length - embargo + i
+                
+                if idx < 0 or idx >= len(data['recent_values']):
+                    break
+                
+                date = pd.to_datetime(data['recent_dates'][idx])
+                value = data['recent_values'][idx]
+                feat = data['recent_features'][idx]
+                
+                # Build feature vector
+                features_list = [value]
+                features_list.append(feat)
+                features_list.extend([date.year, date.month])
+                features_list.append(ts_key_onehot)
+                
+                feature_vector = np.concatenate([
+                    np.array(f).flatten() if not isinstance(f, (int, float)) else [f]
+                    for f in features_list
+                ])
+                
+                sequence.append(feature_vector)
+            
+            # Only add if we have a complete sequence
+            if len(sequence) == seq_length:
+                batch_ts_keys.append(ts_key)
+                batch_sequences.append(sequence)
+        
+        # If no time series to predict at this step, continue
+        if len(batch_sequences) == 0:
+            continue
+        
+        # -------------------------------------------------------------------------
+        # STEP 4: Batch prediction for all time series at this step
+        # -------------------------------------------------------------------------
+        
+        # Stack all sequences into a batch
+        batch_array = np.array(batch_sequences, dtype=np.float32)  # (batch_size, seq_length, n_features)
+        
+        # Separate continuous and one-hot features
+        batch_continuous = batch_array[:, :, :n_continuous]  # (batch_size, seq_length, n_continuous)
+        batch_onehot = batch_array[:, :, n_continuous:]      # (batch_size, seq_length, n_onehot)
+        
+        # Scale continuous features
+        batch_size, seq_len, n_cont = batch_continuous.shape
+        batch_continuous_flat = batch_continuous.reshape(-1, n_cont)
+        batch_continuous_scaled = scaler_X.transform(batch_continuous_flat)
+        batch_continuous_scaled = batch_continuous_scaled.reshape(batch_size, seq_len, n_cont)
+        
+        # Recombine
+        batch_scaled = np.concatenate([batch_continuous_scaled, batch_onehot], axis=2)
+        
+        # Single forward pass for entire batch
+        with torch.no_grad():
+            X_batch = torch.FloatTensor(batch_scaled).to(device)
+            pred_scaled_batch = model(X_batch).cpu().numpy()  # (batch_size, 1)
+            pred_values_batch = scaler_y.inverse_transform(pred_scaled_batch).flatten()
+        
+        # All negative predictions are set to zero
+        pred_values_batch = np.maximum(pred_values_batch, 0.0)
+
+        # -------------------------------------------------------------------------
+        # STEP 5: Update histories for all time series in batch
+        # -------------------------------------------------------------------------
+        
+        for i, ts_key in enumerate(batch_ts_keys):
+            data = ts_data[ts_key]
+            pred_value = pred_values_batch[i]
+            
+            # Store prediction
+            data['predictions'].append(pred_value)
+            
+            # Get actual value and features for this prediction
+            pred_date = pd.to_datetime(data['test_dates'][step])
+            
+            # Use actual value from test set
+            actual_value = data['test_actuals'][step]
+            
+            # Get actual features or carry forward
+            test_group = df_for_prediction[
+                (df_for_prediction['ts_key'] == ts_key) & 
+                (df_for_prediction['Date'] == pred_date)
+            ]
+            
+            if len(test_group) > 0:
+                actual_features = test_group[features].values[0]
+            else:
+                actual_features = data['recent_features'][-1]
+            
+            # Update history
+            data['recent_values'] = np.append(data['recent_values'], actual_value)
+            data['recent_features'] = np.vstack([data['recent_features'], actual_features])
+            data['recent_dates'] = np.append(data['recent_dates'], pred_date)
+    
+    # -------------------------------------------------------------------------
+    # STEP 6: Collect results
+    # -------------------------------------------------------------------------
+    
+    predictions_dict = {}
+    actuals_dict = {}
+    
+    for ts_key in valid_ts_keys:
+        data = ts_data[ts_key]
+        if len(data['predictions']) > 0:
+            predictions_dict[ts_key] = data['predictions']
+            actuals_dict[ts_key] = data['test_actuals'][:len(data['predictions'])]
+    
+    all_preds = np.concatenate([np.array(v) for v in predictions_dict.values()])
+    all_acts = np.concatenate([np.array(v) for v in actuals_dict.values()])
+    
+    print(f"Generated predictions for {len(predictions_dict)} time series")
+    print(f"Total predictions: {len(all_preds):,}")
+    print(f"Optimization: {len(valid_ts_keys) * max_horizon} individual predictions → {max_horizon} batched forward passes")
+    
+    return predictions_dict, actuals_dict, all_preds, all_acts
+
+
+def smape(y_true, y_pred):
+    """Symmetric Mean Absolute Percentage Error"""
+    denominator = (np.abs(y_true) + np.abs(y_pred)) / 2.0
+    diff = np.abs(y_true - y_pred) / denominator
+    diff[denominator == 0] = 0.0
+    return 100 * np.mean(diff)
+
+def calculate_smape_distribution(predictions_dict, actuals_dict):
+    """
+    Calculate SMAPE per time series and categorize into quality buckets.
+    
+    Args:
+        predictions_dict: Dict mapping ts_key -> list of predictions
+        actuals_dict: Dict mapping ts_key -> list of actual values
+        
+    Returns:
+        DataFrame with ts_key, smape, and category columns
+    """
+    smape_results = []
+    
+    for ts_key in predictions_dict.keys():
+        preds = np.array(predictions_dict[ts_key])
+        acts = np.array(actuals_dict[ts_key])
+        
+        # Calculate SMAPE for this time series
+        ts_smape = smape(acts, preds)
+        
+        # Categorize SMAPE
+        if ts_smape < 10:
+            category = '<10%'
+        elif ts_smape <= 20:
+            category = '10-20%'
+        elif ts_smape <= 30:
+            category = '20-30%'
+        elif ts_smape <= 40:
+            category = '30-40%'
+        else:
+            category = '>40%'
+        
+        smape_results.append({
+            'ts_key': ts_key,
+            'smape': ts_smape,
+            'category': category
+        })
+    
+    return pd.DataFrame(smape_results)
+
+def train_epoch(model, loader, criterion, optimizer, device):
+
+    # Enable training mode
+    model.train()
+
+    total_loss = 0
+
+    for X_batch, y_batch in loader:
+        # Move data to MPS/CUDA if available
+        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+
+        # Clear all gradients from previous iteration
+        optimizer.zero_grad()
+
+        # Pass the batch through the model
+        predictions = model(X_batch)
+
+        loss = criterion(predictions, y_batch)
+
+        # Backpropagation and optimization
+        loss.backward()
+
+        # Prevetns exploding gradients, scales gradients if norm exceeds max_norm
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        # Update weights
+        optimizer.step()
+
+        # Add batch loss to total loss
+        total_loss += loss.item()
+
+    # Divides by number of batches to get average loss per batch
+    return total_loss / len(loader)
+
+def evaluate(model, loader, criterion, device):
+    model.eval()
+    total_loss = 0
+    with torch.no_grad():
+        for X_batch, y_batch in loader:
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+            predictions = model(X_batch)
+            loss = criterion(predictions, y_batch)
+            total_loss += loss.item()
+    return total_loss / len(loader)
 
 if __name__ == "__main__":
 
@@ -325,81 +834,6 @@ if __name__ == "__main__":
         print(f"  Training data: up to {fold['train_end']}")
         print(f"  Test period: {fold['test_start']} to {fold['test_end']}")
     
-    # ========================================================================
-    # HELPER FUNCTIONS
-    # ========================================================================
-    
-    def smape(y_true, y_pred):
-        """Symmetric Mean Absolute Percentage Error"""
-        denominator = (np.abs(y_true) + np.abs(y_pred)) / 2.0
-        diff = np.abs(y_true - y_pred) / denominator
-        diff[denominator == 0] = 0.0
-        return 100 * np.mean(diff)
-    
-    def calculate_smape_distribution(predictions_dict, actuals_dict):
-        """
-        Calculate SMAPE per time series and categorize into quality buckets.
-        
-        Args:
-            predictions_dict: Dict mapping ts_key -> list of predictions
-            actuals_dict: Dict mapping ts_key -> list of actual values
-            
-        Returns:
-            DataFrame with ts_key, smape, and category columns
-        """
-        smape_results = []
-        
-        for ts_key in predictions_dict.keys():
-            preds = np.array(predictions_dict[ts_key])
-            acts = np.array(actuals_dict[ts_key])
-            
-            # Calculate SMAPE for this time series
-            ts_smape = smape(acts, preds)
-            
-            # Categorize SMAPE
-            if ts_smape < 10:
-                category = '<10%'
-            elif ts_smape <= 20:
-                category = '10-20%'
-            elif ts_smape <= 30:
-                category = '20-30%'
-            elif ts_smape <= 40:
-                category = '30-40%'
-            else:
-                category = '>40%'
-            
-            smape_results.append({
-                'ts_key': ts_key,
-                'smape': ts_smape,
-                'category': category
-            })
-        
-        return pd.DataFrame(smape_results)
-    
-    def train_epoch(model, loader, criterion, optimizer, device):
-        model.train()
-        total_loss = 0
-        for X_batch, y_batch in loader:
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-            optimizer.zero_grad()
-            predictions = model(X_batch)
-            loss = criterion(predictions, y_batch)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            total_loss += loss.item()
-        return total_loss / len(loader)
-    
-    def evaluate(model, loader, criterion, device):
-        model.eval()
-        total_loss = 0
-        with torch.no_grad():
-            for X_batch, y_batch in loader:
-                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                predictions = model(X_batch)
-                loss = criterion(predictions, y_batch)
-                total_loss += loss.item()
-        return total_loss / len(loader)
     
     # ========================================================================
     # TRAINING PARAMETERS
@@ -529,139 +963,35 @@ if __name__ == "__main__":
         print(f"\nTraining completed in {time.time() - start_time:.1f}s")
         print(f"Best validation loss: {best_val_loss:.6f}")
         
+
         # -----------------------------------------------------------------
         # STEP 3: Out-of-sample predictions on test period
         # -----------------------------------------------------------------
-        print("\n" + "-"*60)
-        print("STEP 3: Out-of-sample predictions")
-        print("-"*60)
-        
+
         # Get test period data
         df_test_period = df_full[
             (df_full['Date'] >= fold_config['test_start']) & 
             (df_full['Date'] <= fold_config['test_end'])
         ].copy()
-        
-        print(f"Test period: {fold_config['test_start']} to {fold_config['test_end']}")
-        print(f"Test observations: {len(df_test_period):,}")
-        
-        # For prediction, we need the last SEQ_LENGTH + EMBARGO observations before test period
-        # to build the initial input sequence
-        test_start_date = pd.to_datetime(fold_config['test_start'])
-        lookback_start = test_start_date - pd.DateOffset(months=SEQ_LENGTH + EMBARGO)
-        
-        df_for_prediction = df_full[
-            (df_full['Date'] >= lookback_start) & 
-            (df_full['Date'] <= fold_config['test_end'])
-        ].copy()
-        
-        # Generate predictions using autoregressive approach
-        model.eval()
-        predictions_dict = {}
-        actuals_dict = {}
-        
-        # Group by time series
-        for ts_key, group in df_for_prediction.groupby('ts_key'):
-            group = group.sort_values('Date')
-            
-            # Get ts_key one-hot encoding
-            if ts_key not in ts_key_to_idx:
-                continue  # Skip if time series not seen during training
-            
-            ts_key_idx = ts_key_to_idx[ts_key]
-            ts_key_onehot = np.zeros(n_ts_keys, dtype=np.float32)
-            ts_key_onehot[ts_key_idx] = 1.0
-            
-            # Get historical data (before test period)
-            hist_data = group[group['Date'] < test_start_date]
-            
-            if len(hist_data) < SEQ_LENGTH + EMBARGO:
-                continue  # Not enough history
-            
-            # Initialize with last SEQ_LENGTH observations
-            recent_values = hist_data['Value'].values[-(SEQ_LENGTH + EMBARGO):]
-            recent_features = hist_data[features].values[-(SEQ_LENGTH + EMBARGO):]
-            recent_dates = pd.to_datetime(hist_data['Date'].values[-(SEQ_LENGTH + EMBARGO):])
-            
-            # Predict for each month in test period
-            test_dates = group[group['Date'] >= test_start_date]['Date'].values
-            test_actuals = group[group['Date'] >= test_start_date]['Value'].values
-            
-            predictions_list = []
-            
-            for pred_idx, pred_date in enumerate(test_dates):
-                pred_date = pd.to_datetime(pred_date)
-                
-                # Build input sequence (last SEQ_LENGTH observations, with EMBARGO gap)
-                # If EMBARGO=1: use [t-SEQ_LENGTH-1, ..., t-2] to predict t
-                sequence = []
-                
-                for i in range(SEQ_LENGTH):
-                    idx = len(recent_values) - SEQ_LENGTH - EMBARGO + i
-                    
-                    if idx < 0 or idx >= len(recent_values):
-                        break
-                    
-                    date = pd.to_datetime(recent_dates[idx])
-                    value = recent_values[idx]
-                    feat = recent_features[idx]
-                    
-                    # Build feature vector
-                    features_list = [value]
-                    features_list.append(feat)
-                    features_list.extend([date.year, date.month])
-                    features_list.append(ts_key_onehot)
-                    
-                    feature_vector = np.concatenate([
-                        np.array(f).flatten() if not isinstance(f, (int, float)) else [f]
-                        for f in features_list
-                    ])
-                    
-                    sequence.append(feature_vector)
-                
-                if len(sequence) != SEQ_LENGTH:
-                    break
-                
-                # Scale input
-                sequence = np.array(sequence, dtype=np.float32)
-                n_continuous = 1 + len(features) + 2
-                
-                seq_continuous = sequence[:, :n_continuous]
-                seq_onehot = sequence[:, n_continuous:]
-                
-                seq_continuous_scaled = scaler_X.transform(seq_continuous)
-                sequence_scaled = np.concatenate([seq_continuous_scaled, seq_onehot], axis=1)
-                
-                # Predict
-                with torch.no_grad():
-                    X_input = torch.FloatTensor(sequence_scaled).unsqueeze(0).to(device)
-                    pred_scaled = model(X_input).cpu().numpy()[0, 0]
-                    pred_value = scaler_y.inverse_transform([[pred_scaled]])[0, 0]
-                
-                predictions_list.append(pred_value)
-                
-                # Update history for next prediction
-                # Get actual features for this date (or carry forward last known)
-                actual_row = group[group['Date'] == pred_date]
-                if len(actual_row) > 0:
-                    actual_value = actual_row['Value'].values[0]
-                    actual_features = actual_row[features].values[0]
-                else:
-                    actual_value = pred_value  # Fallback
-                    actual_features = recent_features[-1]
-                
-                recent_values = np.append(recent_values, actual_value)
-                recent_features = np.vstack([recent_features, actual_features])
-                recent_dates = np.append(recent_dates, pred_date)
-            
-            if len(predictions_list) > 0:
-                predictions_dict[ts_key] = predictions_list
-                actuals_dict[ts_key] = test_actuals[:len(predictions_list)]
-        
-        # Flatten predictions and actuals
-        all_preds = np.concatenate([np.array(v) for v in predictions_dict.values()])
-        all_acts = np.concatenate([np.array(v) for v in actuals_dict.values()])
-        
+
+
+        # Optimized version
+        predictions_dict, actuals_dict, all_preds, all_acts = generate_out_of_sample_predictions(model=model,
+            df_test_period=df_test_period,
+            df_full=df_full,
+            fold_config=fold_config,
+            features=features,
+            scaler_X=scaler_X,
+            scaler_y=scaler_y,
+            ts_key_to_idx=ts_key_to_idx,
+            n_ts_keys=n_ts_keys,
+            seq_length=SEQ_LENGTH,
+            embargo=EMBARGO,
+            device=device
+        )
+
+
+        # -----------------------------------------------------------------
         # Create predictions DataFrame and save as CSV
         # -----------------------------------------------------------------
         predictions_data = []
@@ -722,7 +1052,6 @@ if __name__ == "__main__":
             print(f"  {cat:>10}: {count:4d} series ({pct:5.1f}%)")
         
         # -----------------------------------------------------------------
-        # -----------------------------------------------------------------
         # STEP 4: Calculate metrics
         # -----------------------------------------------------------------
         print("\n" + "-"*60)
@@ -775,6 +1104,7 @@ if __name__ == "__main__":
         axes[0].set_xlabel('Epoch', fontsize=12)
         axes[0].set_ylabel('Loss (MSE)', fontsize=12)
         axes[0].set_title(f'{fold_config["name"]} - Training History', fontsize=13, fontweight='bold')
+
     # ========================================================================
     # SMAPE DISTRIBUTION ANALYSIS
     # ========================================================================

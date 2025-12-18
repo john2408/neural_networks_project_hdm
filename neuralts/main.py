@@ -8,7 +8,8 @@ import time
 import argparse
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
-from neuralts.core.models import LSTMForecaster, RNNForecaster, GRUForecaster, CNN1DForecaster, TransformerForecaster, TransformerForecasterCLS
+from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster, 
+                            CNN1DForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
 

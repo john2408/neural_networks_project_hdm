@@ -5,38 +5,15 @@ import numpy as np
 import pandas as pd
 import warnings
 import time
-import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
-from neuralts.core.models import LSTMForecaster
+from neuralts.core.models import LSTMForecaster, RNNForecaster, TransformerForecaster, TransformerForecasterCLS
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
 
 
 warnings.filterwarnings('ignore')
 
-    # # Enable evaluation mode (disables dropout and batch norm updates)
-    # model.eval()
-    
-    # total_loss = 0
-    
-    # # Disable gradient calculation for evaluation (saves memory and computation)
-    # with torch.no_grad():
-    #     for X_batch, y_batch in loader:
-    #         # Move data to MPS/CUDA if available
-    #         X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-            
-    #         # Pass the batch through the model
-    #         predictions = model(X_batch)
-            
-    #         # Calculate loss
-    #         loss = criterion(predictions, y_batch)
-            
-    #         # Add batch loss to total loss
-    #         total_loss += loss.item()
-    
-    # # Divides by number of batches to get average loss per batch
-    # return total_loss / len(loader)
 
 if __name__ == "__main__":
 
@@ -145,6 +122,7 @@ if __name__ == "__main__":
     
     fold_metrics = []
     fold_smape_distributions = []
+    import matplotlib.pyplot as plt
     
     for fold_idx, fold_config in enumerate(folds):
         

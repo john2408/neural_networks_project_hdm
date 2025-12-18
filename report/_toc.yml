@@ -13,7 +13,7 @@ parts:
   - file: 2_1_Data_Analysis
 - caption: Modeling
   chapters:
-  - file: 3_1_RNN_Model
+  - file: 3_1_Modelling_Approach
   - file: 3_2_LSTM_Model
   - file: 3_3_GRU_Model
   - file: 3_4_NBEATSx_Model

@@ -5,6 +5,7 @@ __pycache__/
 data/
 .DS_Store
 report/_build/
+models/
 
 # C extensions
 *.so

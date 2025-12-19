@@ -21,8 +21,8 @@ parts:
   - file: 3_6_CNN_1D
   - file: 3_7_NBEATSx_Model
   - file: 3_8_NHITS_Model
-  - file: 3_9_Chronos_Model
-  - file: 3_10_TFT_Model
+  - file: 3_9_TFT_Model
+  - file: 3_10_Chronos_Model
   - file: 3_11_Comparison_of_Models
 - caption: Results and Conclusion
   chapters:

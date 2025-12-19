@@ -30,7 +30,7 @@ if __name__ == "__main__":
     BATCH_SIZE = 64
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
-    MODEL = 'Transformer'  # Options: 'LSTM', 'RNN', 'Transformer', 'TransformerCLS'
+    MODEL = 'BASELINE'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'Transformer', 'TransformerCLS', 'BASELINE'
 
 
     # ========================================================================
@@ -151,163 +151,221 @@ if __name__ == "__main__":
         print(f"  Date range: {df_train['Date'].min()} to {df_train['Date'].max()}")
         
         # -----------------------------------------------------------------
-        # STEP 1: Create datasets for model development (train/val split)
+        # BASELINE MODEL: Moving Average
         # -----------------------------------------------------------------
-        print("\n" + "-"*60)
-        print("STEP 1: Creating datasets for model development")
-        print("-"*60)
+        if MODEL == 'BASELINE':
+            print("\n" + "-"*60)
+            print("BASELINE MODEL: Calculating Moving Average Predictions")
+            print("-"*60)
+            
+            # Get test period data
+            df_test_period = df_full[
+                (df_full['Date'] >= fold_config['test_start']) & 
+                (df_full['Date'] <= fold_config['test_end'])
+            ].copy()
+            
+            # Calculate moving average baseline for each time series
+            predictions_dict = {}
+            actuals_dict = {}
+            all_preds = []
+            all_acts = []
+            
+            unique_ts_keys = df_test_period['ts_key'].unique()
+            print(f"Generating baseline predictions for {len(unique_ts_keys)} time series...")
+            
+            for ts_key in unique_ts_keys:
+                # Get last SEQ_LENGTH values up to train_end for this time series
+                ts_train_data = df_train[df_train['ts_key'] == ts_key].sort_values('Date')
+                
+                if len(ts_train_data) < SEQ_LENGTH + EMBARGO:
+                    # If not enough history, use all available data
+                    baseline_value = ts_train_data['Value'].mean()
+                else:
+                    # Use last SEQ_LENGTH values, skipping the EMBARGO period
+                    baseline_value = ts_train_data['Value'].iloc[-(SEQ_LENGTH + EMBARGO):-EMBARGO].mean()
+
+                # Get actual values for this time series in test period
+                ts_test_data = df_test_period[df_test_period['ts_key'] == ts_key].sort_values('Date')
+                actual_values = ts_test_data['Value'].values
+                
+                # Predict the same baseline value for all test periods
+                predicted_values = np.full(len(actual_values), baseline_value)
+
+                # Round prediction to 1 decimal place
+                predicted_values = np.round(predicted_values, 1)
+                
+                # Replance NaN prediction with zero
+                predicted_values = np.where(np.isnan(predicted_values), 0, predicted_values)
+
+                predictions_dict[ts_key] = predicted_values
+                actuals_dict[ts_key] = actual_values
+                all_preds.extend(predicted_values)
+                all_acts.extend(actual_values)
+            
+            all_preds = np.array(all_preds)
+            all_acts = np.array(all_acts)
+            
+            print(f"✓ Generated {len(all_preds)} baseline predictions")
+            
+        else:
+            # -----------------------------------------------------------------
+            # STEP 1: Create datasets for model development (train/val split)
+            # -----------------------------------------------------------------
+            print("\n" + "-"*60)
+            print("STEP 1: Creating datasets for model development")
+            print("-"*60)
         
-        train_dataset = TimeSeriesDataset(
-            df_train,
-            feature_cols=features, 
-            seq_length=SEQ_LENGTH,
-            embargo=EMBARGO,
-            train=True,
-            train_ratio=TRAIN_RATIO
-        )
-        
-        print(f"Training samples: {len(train_dataset):,}")
-        
-        # Save scalers and metadata
-        scaler_X = train_dataset.scaler_X
-        scaler_y = train_dataset.scaler_y
-        n_ts_keys = train_dataset.n_ts_keys
-        ts_key_to_idx = train_dataset.ts_key_to_idx
-        
-        test_dataset = TimeSeriesDataset(
-            df_train,
-            feature_cols=features,
-            seq_length=SEQ_LENGTH,
-            train=False,
-            embargo=EMBARGO,
-            train_ratio=TRAIN_RATIO,
-            scaler_X=scaler_X,
-            scaler_y=scaler_y
-        )
-        
-        print(f"Validation samples: {len(test_dataset):,}")
+            train_dataset = TimeSeriesDataset(
+                df_train,
+                feature_cols=features, 
+                seq_length=SEQ_LENGTH,
+                embargo=EMBARGO,
+                train=True,
+                train_ratio=TRAIN_RATIO
+            )
+            
+            print(f"Training samples: {len(train_dataset):,}")
+            
+            # Save scalers and metadata
+            scaler_X = train_dataset.scaler_X
+            scaler_y = train_dataset.scaler_y
+            n_ts_keys = train_dataset.n_ts_keys
+            ts_key_to_idx = train_dataset.ts_key_to_idx
+            
+            test_dataset = TimeSeriesDataset(
+                df_train,
+                feature_cols=features,
+                seq_length=SEQ_LENGTH,
+                train=False,
+                embargo=EMBARGO,
+                train_ratio=TRAIN_RATIO,
+                scaler_X=scaler_X,
+                scaler_y=scaler_y
+            )
+            
+            print(f"Validation samples: {len(test_dataset):,}")
         
         # -----------------------------------------------------------------
         # STEP 2: Initialize and train model
         # -----------------------------------------------------------------
-        print("\n" + "-"*60)
-        print(f"STEP 2: Training {MODEL} model")
-        print("-"*60)
-        
-        INPUT_SIZE = train_dataset.X.shape[2]
-        
-        if MODEL == 'LSTM':
-            model = LSTMForecaster(
-                input_size=INPUT_SIZE,
-                hidden_size=64,
-                num_layers=2,
-                dropout=0.2
-            ).to(device)
-        elif MODEL == 'RNN':
-            model = RNNForecaster(
-                input_size=INPUT_SIZE,
-                hidden_size=64,
-                num_layers=2,
-                dropout=0.2
-            ).to(device)
-        elif MODEL == 'GRU':
-            model = GRUForecaster(
-                input_size=INPUT_SIZE,
-                hidden_size=64,
-                num_layers=2,
-                dropout=0.2
-            ).to(device)
-        elif MODEL == 'CNN1D':
-            model = CNN1DForecaster(
-                input_size=INPUT_SIZE,
-                hidden_size=64,
-                num_layers=3,
-                dropout=0.2
-            ).to(device)
-        elif MODEL == 'Transformer':
-            model = TransformerForecaster(
-                input_size=INPUT_SIZE,
-                d_model=64,
-                nhead=4,
-                num_layers=2,
-                dim_feedforward=128,
-                dropout=0.2
-            ).to(device)
-        elif MODEL == 'TransformerCLS':
-            model = TransformerForecasterCLS(
-                input_size=INPUT_SIZE,
-                d_model=64,
-                nhead=4,
-                num_layers=2,
-                dim_feedforward=128,
-                dropout=0.2
-            ).to(device)
-        else:
-            raise ValueError(f"Unsupported MODEL type: {MODEL}")
-    
-        print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-        
-        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-        val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
-        
-        criterion = nn.MSELoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
-        
-        best_val_loss = float('inf')
-        train_losses = []
-        val_losses = []
-        
-        start_time = time.time()
-        
-        for epoch in range(EPOCHS):
-            train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-            val_loss = evaluate(model, val_loader, criterion, device)
+            print("\n" + "-"*60)
+            print(f"STEP 2: Training {MODEL} model")
+            print("-"*60)
             
-            train_losses.append(train_loss)
-            val_losses.append(val_loss)
+            INPUT_SIZE = train_dataset.X.shape[2]
             
-            scheduler.step(val_loss)
+            if MODEL == 'LSTM':
+                model = LSTMForecaster(
+                    input_size=INPUT_SIZE,
+                    hidden_size=64,
+                    num_layers=2,
+                    dropout=0.2
+                ).to(device)
+            elif MODEL == 'RNN':
+                model = RNNForecaster(
+                    input_size=INPUT_SIZE,
+                    hidden_size=64,
+                    num_layers=2,
+                    dropout=0.2
+                ).to(device)
+            elif MODEL == 'GRU':
+                model = GRUForecaster(
+                    input_size=INPUT_SIZE,
+                    hidden_size=64,
+                    num_layers=2,
+                    dropout=0.2
+                ).to(device)
+            elif MODEL == 'CNN1D':
+                model = CNN1DForecaster(
+                    input_size=INPUT_SIZE,
+                    hidden_size=64,
+                    num_layers=3,
+                    dropout=0.2
+                ).to(device)
+            elif MODEL == 'Transformer':
+                model = TransformerForecaster(
+                    input_size=INPUT_SIZE,
+                    d_model=64,
+                    nhead=4,
+                    num_layers=2,
+                    dim_feedforward=128,
+                    dropout=0.2
+                ).to(device)
+            elif MODEL == 'TransformerCLS':
+                model = TransformerForecasterCLS(
+                    input_size=INPUT_SIZE,
+                    d_model=64,
+                    nhead=4,
+                    num_layers=2,
+                    dim_feedforward=128,
+                    dropout=0.2
+                ).to(device)
+            else:
+                raise ValueError(f"Unsupported MODEL type: {MODEL}")
+        
+                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
             
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_model_state = model.state_dict().copy()
+            train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+            val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
             
-            if (epoch + 1) % 10 == 0 or epoch == 0:
-                elapsed = time.time() - start_time
-                print(f"Epoch [{epoch+1:3d}/{EPOCHS}] | Train: {train_loss:.6f} | Val: {val_loss:.6f} | Time: {elapsed:.1f}s")
-        
-        # Load best model
-        model.load_state_dict(best_model_state)
-        
-        print(f"\nTraining completed in {time.time() - start_time:.1f}s")
-        print(f"Best validation loss: {best_val_loss:.6f}")
-        
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+            
+            best_val_loss = float('inf')
+            train_losses = []
+            val_losses = []
+            
+            start_time = time.time()
+            
+            for epoch in range(EPOCHS):
+                train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
+                val_loss = evaluate(model, val_loader, criterion, device)
+                
+                train_losses.append(train_loss)
+                val_losses.append(val_loss)
+                
+                scheduler.step(val_loss)
+                
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_model_state = model.state_dict().copy()
+                
+                if (epoch + 1) % 10 == 0 or epoch == 0:
+                    elapsed = time.time() - start_time
+                    print(f"Epoch [{epoch+1:3d}/{EPOCHS}] | Train: {train_loss:.6f} | Val: {val_loss:.6f} | Time: {elapsed:.1f}s")
+            
+            # Load best model
+            model.load_state_dict(best_model_state)
+            
+            print(f"\nTraining completed in {time.time() - start_time:.1f}s")
+            print(f"Best validation loss: {best_val_loss:.6f}")
+            
 
-        # -----------------------------------------------------------------
-        # STEP 3: Out-of-sample predictions on test period
-        # -----------------------------------------------------------------
+            # -----------------------------------------------------------------
+            # STEP 3: Out-of-sample predictions on test period
+            # -----------------------------------------------------------------
 
-        # Get test period data
-        df_test_period = df_full[
-            (df_full['Date'] >= fold_config['test_start']) & 
-            (df_full['Date'] <= fold_config['test_end'])
-        ].copy()
+            # Get test period data
+            df_test_period = df_full[
+                (df_full['Date'] >= fold_config['test_start']) & 
+                (df_full['Date'] <= fold_config['test_end'])
+            ].copy()
 
 
-        predictions_dict, actuals_dict, all_preds, all_acts = generate_out_of_sample_predictions(model=model,
-            df_test_period=df_test_period,
-            df_full=df_full,
-            fold_config=fold_config,
-            features=features,
-            scaler_X=scaler_X,
-            scaler_y=scaler_y,
-            ts_key_to_idx=ts_key_to_idx,
-            n_ts_keys=n_ts_keys,
-            seq_length=SEQ_LENGTH,
-            embargo=EMBARGO,
-            device=device
-        )
+            predictions_dict, actuals_dict, all_preds, all_acts = generate_out_of_sample_predictions(model=model,
+                df_test_period=df_test_period,
+                df_full=df_full,
+                fold_config=fold_config,
+                features=features,
+                scaler_X=scaler_X,
+                scaler_y=scaler_y,
+                ts_key_to_idx=ts_key_to_idx,
+                n_ts_keys=n_ts_keys,
+                seq_length=SEQ_LENGTH,
+                embargo=EMBARGO,
+                device=device
+            )
 
 
         # -----------------------------------------------------------------
@@ -398,31 +456,70 @@ if __name__ == "__main__":
         print(f"  MAE:   {mae:.2f}")
         print(f"  R²:    {r2:.4f}")
         print(f"  SMAPE: {smape_score:.2f}%")
-                
-        torch.save({
-            'model_state_dict': best_model_state,
-            'input_size': INPUT_SIZE,
-            'hidden_size': 64,
-            'num_layers': 2,
-            'dropout': 0.2,
-            'scaler_X': scaler_X,
-            'scaler_y': scaler_y,
-            'n_ts_keys': n_ts_keys,
-            'ts_key_to_idx': ts_key_to_idx,
-            'seq_length': SEQ_LENGTH,
-            'fold_config': fold_config,
-            'metrics': fold_metrics[-1]
-        }, os.path.join(fold_output_dir, 'model_checkpoint.pth'))
         
-        # Visualization
-        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+        # Save model checkpoint (skip for baseline)
+        if MODEL != 'BASELINE':
+            torch.save({
+                'model_state_dict': best_model_state,
+                'input_size': INPUT_SIZE,
+                'hidden_size': 64,
+                'num_layers': 2,
+                'dropout': 0.2,
+                'scaler_X': scaler_X,
+                'scaler_y': scaler_y,
+                'n_ts_keys': n_ts_keys,
+                'ts_key_to_idx': ts_key_to_idx,
+                'seq_length': SEQ_LENGTH,
+                'fold_config': fold_config,
+                'metrics': fold_metrics[-1]
+            }, os.path.join(fold_output_dir, 'model_checkpoint.pth'))
         
-        # Training history
-        axes[0].plot(train_losses, label='Training Loss', linewidth=2, color='#2E86AB')
-        axes[0].plot(val_losses, label='Validation Loss', linewidth=2, color='#A23B72')
-        axes[0].set_xlabel('Epoch', fontsize=12)
-        axes[0].set_ylabel('Loss (MSE)', fontsize=12)
-        axes[0].set_title(f'{fold_config["name"]} - Training History', fontsize=13, fontweight='bold')
+        # Visualization (skip for baseline)
+        if MODEL != 'BASELINE':
+            fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+            
+            # Training history
+            axes[0].plot(train_losses, label='Training Loss', linewidth=2, color='#2E86AB')
+            axes[0].plot(val_losses, label='Validation Loss', linewidth=2, color='#A23B72')
+            axes[0].set_xlabel('Epoch', fontsize=12)
+            axes[0].set_ylabel('Loss (MSE)', fontsize=12)
+            axes[0].set_title(f'{fold_config["name"]} - Training History', fontsize=13, fontweight='bold')
+            axes[0].legend(fontsize=10)
+            axes[0].grid(True, alpha=0.3)
+            
+            # Predictions vs Actuals
+            axes[1].scatter(all_acts, all_preds, alpha=0.3, s=10, color='#2E86AB')
+            axes[1].plot([all_acts.min(), all_acts.max()], 
+                    [all_acts.min(), all_acts.max()], 
+                    'r--', linewidth=2, label='Perfect Prediction')
+            axes[1].set_xlabel('Actual Values', fontsize=12)
+            axes[1].set_ylabel('Predicted Values', fontsize=12)
+            axes[1].set_title(f'{fold_config["name"]} - Predictions (R²={r2:.4f}, SMAPE={smape_score:.2f}%)', 
+                    fontsize=13, fontweight='bold')
+            axes[1].legend(fontsize=10)
+            axes[1].grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(fold_output_dir, 'fold_results.png'), dpi=300, bbox_inches='tight')
+            plt.close()
+        
+        # Predictions vs Actuals (for all models including BASELINE)
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.scatter(all_acts, all_preds, alpha=0.3, s=10, color='#2E86AB')
+        ax.plot([all_acts.min(), all_acts.max()], 
+            [all_acts.min(), all_acts.max()], 
+            'r--', linewidth=2, label='Perfect Prediction')
+        ax.set_xlabel('Actual Values', fontsize=12)
+        ax.set_ylabel('Predicted Values', fontsize=12)
+        ax.set_title(f'{fold_config["name"]} - Predictions (R²={r2:.4f}, SMAPE={smape_score:.2f}%)', 
+                 fontsize=13, fontweight='bold')
+        ax.legend(fontsize=10)
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(os.path.join(fold_output_dir, 'predictions_vs_actuals.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"\n✓ Saved fold results to: {fold_output_dir}")
 
     # ========================================================================
     # SMAPE DISTRIBUTION ANALYSIS
@@ -460,24 +557,6 @@ if __name__ == "__main__":
     print(f"\n✓ Saved metrics to: {output_path}/fold_metrics.csv")
     print(f"✓ Saved summary to: {output_path}/summary_metrics.csv")
     print(f"✓ Saved SMAPE distribution to: {output_path}/smape_distribution.csv")
-    
-    # Predictions vs Actuals
-    axes[1].scatter(all_acts, all_preds, alpha=0.3, s=10, color='#2E86AB')
-    axes[1].plot([all_acts.min(), all_acts.max()], 
-                    [all_acts.min(), all_acts.max()], 
-                    'r--', linewidth=2, label='Perfect Prediction')
-    axes[1].set_xlabel('Actual Values', fontsize=12)
-    axes[1].set_ylabel('Predicted Values', fontsize=12)
-    axes[1].set_title(f'{fold_config["name"]} - Predictions (R²={r2:.4f}, SMAPE={smape_score:.2f}%)', 
-                        fontsize=13, fontweight='bold')
-    axes[1].legend(fontsize=10)
-    axes[1].grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(fold_output_dir, 'fold_results.png'), dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"\n✓ Saved fold results to: {fold_output_dir}")
     
     # ========================================================================
     # FINAL RESULTS: Average metrics across all folds

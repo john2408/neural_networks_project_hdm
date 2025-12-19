@@ -144,6 +144,46 @@ def pad_timeseries_to_same_length(df):
     
     return df_padded
 
+
+def create_rolling_features(df: pd.DataFrame, windows: list[int], embargo: int = 1) -> pd.DataFrame:
+    """
+    Create rolling statistical features with embargo period.
+    
+    Args:
+        df: DataFrame with ts_key, Date, and Value columns
+        windows: List of window sizes for rolling calculations
+        embargo: Number of periods to shift features to avoid data leakage (default=1)
+    """
+    df = df.sort_values(by=["ts_key", "Date"]).reset_index(drop=True)
+    
+    for window in windows:
+        # Moving average
+        df[f"MA_{window}"] = (
+            df.groupby("ts_key")["Value"]
+            .rolling(window=window, min_periods=1)
+            .mean()
+            .shift(embargo)
+            .reset_index(drop=True)
+        )
+        
+        # Rolling standard deviation
+        df[f"STD_{window}"] = (
+            df.groupby("ts_key")["Value"]
+            .rolling(window=window, min_periods=1)
+            .std()
+            .shift(embargo)
+            .reset_index(drop=True)
+        )
+        
+        # Bollinger Bands (using 2 standard deviations)
+        df[f"BB_upper_{window}"] = df[f"MA_{window}"] + (2 * df[f"STD_{window}"])
+        df[f"BB_lower_{window}"] = df[f"MA_{window}"] - (2 * df[f"STD_{window}"])
+
+    # FIll nas with backward fill
+    df.fillna(method='bfill', inplace=True)
+    
+    return df
+
 def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = False) -> pd.DataFrame:
     """add all features to KBA dataframe to create gold dataframe"""
 
@@ -158,6 +198,8 @@ def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = Fals
     if zero_padding:
         df_gold = pad_timeseries_to_same_length(df_gold)
 
+    # # Create autorregressive features
+    # df_gold = create_rolling_features(df_gold, windows=[3, 6, 9], embargo=1)
 
 
     if config.include_employment_level:

@@ -7,7 +7,7 @@ import warnings
 import time
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
-from neuralts.core.models import MLPMultivariate
+from neuralts.core.models import MLPMultivariate, LSTMForecasterMultivariate
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import TimeSeriesDatasetFlattened, train_epoch, evaluate
 
@@ -31,9 +31,11 @@ if __name__ == "__main__":
     BATCH_SIZE = 32  # Smaller batch for flattened approach
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
-    MLP_LAYERS = 2
+    MLP_LAYERS = 128
     MLP_HIDDEN_SIZE = 512
-    MODEL = 'MLPMultivariate'  # Options: 'BASELINE', 'MLPMultivariate'
+    LSTM_LAYERS = 64
+    LSTM_HIDDEN_SIZE = 128
+    MODEL = 'MLPMultivariate'  # Options: 'BASELINE', 'MLPMultivariate', 'LSTMMultivariate'
 
 
     # ========================================================================
@@ -251,24 +253,40 @@ if __name__ == "__main__":
             print(f"Validation samples: {len(test_dataset):,}")
             
             # -----------------------------------------------------------------
-            # STEP 2: Initialize and train MLPMultivariate model
+            # STEP 2: Initialize and train model
             # -----------------------------------------------------------------
             print("\n" + "-"*60)
-            print(f"STEP 2: Training MLPMultivariate model")
+            print(f"STEP 2: Training {MODEL} model")
             print("-"*60)
             
-            model = MLPMultivariate(
-                input_size=SEQ_LENGTH,
-                n_series=n_series,
-                n_features_additional=n_features_additional,
-                num_layers=MLP_LAYERS,
-                hidden_size=MLP_HIDDEN_SIZE,
-                dropout=0.2
-            ).to(device)
-        
-            print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-            print(f"Input dimension: {model.input_dim}")
-            print(f"Output dimension: {n_series} (all series)")
+            if MODEL == 'MLPMultivariate':
+                model = MLPMultivariate(
+                    input_size=SEQ_LENGTH,
+                    n_series=n_series,
+                    n_features_additional=n_features_additional,
+                    num_layers=MLP_LAYERS,
+                    hidden_size=MLP_HIDDEN_SIZE,
+                    dropout=0.2
+                ).to(device)
+                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+                print(f"Input dimension: {model.input_dim}")
+                print(f"Output dimension: {n_series} (all series)")
+            
+            elif MODEL == 'LSTMMultivariate':
+                model = LSTMForecasterMultivariate(
+                    input_size=SEQ_LENGTH,
+                    n_series=n_series,
+                    n_features_additional=n_features_additional,
+                    hidden_size=LSTM_HIDDEN_SIZE,
+                    num_layers=LSTM_LAYERS,
+                    dropout=0.2
+                ).to(device)
+                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+                print(f"Features per timestep: {model.features_per_timestep}")
+                print(f"Output dimension: {n_series} (all series)")
+            
+            else:
+                raise ValueError(f"Unknown model: {MODEL}")
             
             train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
             val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
@@ -308,10 +326,10 @@ if __name__ == "__main__":
             
 
             # -----------------------------------------------------------------
-            # STEP 3: Out-of-sample predictions on test period (MLPMultivariate)
+            # STEP 3: Out-of-sample predictions on test period
             # -----------------------------------------------------------------
             print("\n" + "-"*60)
-            print("STEP 3: Out-of-sample predictions (MLPMultivariate)")
+            print(f"STEP 3: Out-of-sample predictions ({MODEL})")
             print("-"*60)
             
             # Get test period data
@@ -541,6 +559,16 @@ if __name__ == "__main__":
                     'n_features_additional': n_features_additional,
                     'num_layers': MLP_LAYERS,
                     'hidden_size': MLP_HIDDEN_SIZE,
+                    'ts_key_to_idx': ts_key_to_idx
+                })
+            
+            elif MODEL == 'LSTMMultivariate':
+                checkpoint_data.update({
+                    'input_size': SEQ_LENGTH,
+                    'n_series': n_series,
+                    'n_features_additional': n_features_additional,
+                    'num_layers': LSTM_LAYERS,
+                    'hidden_size': LSTM_HIDDEN_SIZE,
                     'ts_key_to_idx': ts_key_to_idx
                 })
             

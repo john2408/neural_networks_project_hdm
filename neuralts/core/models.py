@@ -364,6 +364,97 @@ class MLPMultivariate(nn.Module):
         return predictions
 
 
+class LSTMForecasterMultivariate(nn.Module):
+    """
+    LSTM for Multivariate time series forecasting using FLATTENING approach.
+    
+    Similar to MLPMultivariate but uses LSTM to capture temporal dependencies.
+    Processes flattened multivariate sequences and predicts all series simultaneously.
+    
+    Architecture:
+        LSTM Layers -> Dropout -> Fully Connected -> Output (all series)
+    
+    Input structure (flattened per timestep):
+        [value_series1, value_series2, ..., value_seriesN,
+         feat1_series1, feat2_series1, ..., featK_seriesN,
+         year, month]
+    
+    Key advantages:
+    - Captures temporal dependencies across all time series
+    - More parameter-efficient than one-hot encoding for many series
+    - Learns cross-series relationships through shared LSTM layers
+    """
+    def __init__(self, input_size, n_series, n_features_additional=0,
+                 hidden_size=128, num_layers=2, dropout=0.2):
+        """
+        Args:
+            input_size: Sequence length (lookback window)
+            n_series: Number of time series
+            n_features_additional: Number of additional features per series per timestep
+            hidden_size: LSTM hidden dimension
+            num_layers: Number of LSTM layers
+            dropout: Dropout rate
+        """
+        super(LSTMForecasterMultivariate, self).__init__()
+        
+        self.input_size = input_size
+        self.n_series = n_series
+        self.n_features_additional = n_features_additional
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        # Calculate feature dimension per timestep
+        # Each timestep has: n_series values + n_series * n_features + 2 temporal features
+        self.features_per_timestep = n_series * (1 + n_features_additional) + 2
+        
+        # LSTM layers
+        self.lstm = nn.LSTM(
+            input_size=self.features_per_timestep,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0
+        )
+        
+        # Dropout layer
+        self.dropout = nn.Dropout(dropout)
+        
+        # Output layer: predict all n_series at once
+        self.fc = nn.Linear(hidden_size, n_series)
+    
+    def forward(self, x):
+        """
+        Args:
+            x: Input tensor of shape (batch_size, seq_length, n_features)
+               where n_features = n_series + n_series * n_features_additional + 2
+               
+               Structure per timestep:
+               [value_series1, value_series2, ..., value_seriesN,
+                feat1_series1, feat2_series1, ..., featK_series1,
+                feat1_series2, ..., featK_seriesN,
+                year, month]
+        
+        Returns:
+            predictions: (batch_size, n_series) - one prediction per series
+        """
+        # x shape: (batch_size, seq_length, features_per_timestep)
+        
+        # LSTM forward pass
+        lstm_out, (h_n, c_n) = self.lstm(x)
+        # lstm_out: (batch_size, seq_length, hidden_size)
+        
+        # Take the output from the last time step
+        last_output = lstm_out[:, -1, :]  # (batch_size, hidden_size)
+        
+        # Apply dropout
+        out = self.dropout(last_output)
+        
+        # Predict all series
+        predictions = self.fc(out)  # (batch_size, n_series)
+        
+        return predictions
+
+
 class PositionalEncoding(nn.Module):
     """
     Positional encoding for Transformer model.

@@ -175,6 +175,214 @@ class TimeSeriesDataset(Dataset):
         return torch.FloatTensor(self.X[idx]), torch.FloatTensor([self.y[idx]])
 
 
+class TimeSeriesDatasetFlattened(Dataset):
+    """
+    Dataset for FLATTENED MULTIVARIATE time series forecasting.
+    
+    Instead of one-hot encoding, this dataset organizes data by timestep,
+    with ALL time series values flattened into each sample.
+    
+    Key differences from TimeSeriesDataset:
+    - Each sample contains ALL time series at a sequence of timesteps
+    - No one-hot encoding
+    - Data organized by global timestep, not by individual series
+    - More efficient for many time series (100s-1000s)
+    
+    Structure:
+    --------
+    Sample format (per timestep window):
+        Input X: [val₁(t-L), ..., val₁(t-1), val₂(t-L), ..., valₙ(t-1),
+                  feat₁₁(t-L), ..., featₙₖ(t-1), year, month]
+        Target y: [val₁(t), val₂(t), ..., valₙ(t)]
+    
+    Example with 1000 series, 5 features, seq_length=6:
+        Input shape:  (batch, 6, 1000 + 1000*5 + 2) = (batch, 6, 6002)
+        Output shape: (batch, 1000)
+    """
+    def __init__(self, df, feature_cols=None, seq_length=6, embargo=1, 
+                 train=True, train_ratio=0.8, scaler_X=None, scaler_y=None):
+        """
+        Args:
+            df: DataFrame with [Date, ts_key, Value, ...features]
+            feature_cols: List of additional feature column names
+            seq_length: Lookback window size
+            embargo: Gap between last observation and prediction
+            train: If True, create training set
+            train_ratio: Train/test split ratio
+            scaler_X: Pre-fitted StandardScaler for features
+            scaler_y: Pre-fitted StandardScaler for targets
+        """
+        self.seq_length = seq_length
+        self.embargo = embargo
+        
+        # Auto-detect feature columns
+        if feature_cols is None:
+            self.feature_cols = [col for col in df.columns 
+                                if col not in ['Date', 'ts_key', 'Value']]
+        else:
+            self.feature_cols = feature_cols
+        
+        self.n_features_additional = len(self.feature_cols)
+        
+        # Get unique time series and dates
+        unique_ts_keys = sorted(df['ts_key'].unique())
+        self.n_series = len(unique_ts_keys)
+        self.ts_key_to_idx = {key: idx for idx, key in enumerate(unique_ts_keys)}
+        
+        print(f"\nCreating FLATTENED dataset:")
+        print(f"  Time series: {self.n_series}")
+        print(f"  Additional features per series: {self.n_features_additional}")
+        print(f"  Sequence length: {seq_length}, Embargo: {embargo}")
+        
+        # Pivot data to have all series aligned by date
+        # This assumes all series have observations at the same dates
+        df_pivot = df.pivot_table(
+            index='Date',
+            columns='ts_key',
+            values='Value',
+            aggfunc='first'
+        ).sort_index()
+        
+        # Get feature DataFrames for each feature column
+        df_features = {}
+        if self.n_features_additional > 0:
+            for feat in self.feature_cols:
+                df_features[feat] = df.pivot_table(
+                    index='Date',
+                    columns='ts_key',
+                    values=feat,
+                    aggfunc='first'
+                ).sort_index()
+        
+        # Extract dates and check for missing data
+        dates = pd.to_datetime(df_pivot.index)
+        values_matrix = df_pivot.values  # Shape: (n_timesteps, n_series)
+        
+        print(f"  Total timesteps: {len(dates)}")
+        nan_count = np.isnan(values_matrix).sum()
+        print(f"  Missing values in pivoted data: {nan_count}")
+        
+        if nan_count > 0:
+            raise ValueError(
+                f"Found {nan_count} NaN values in pivoted data! "
+                f"All time series must have the same length. "
+                f"Please preprocess data to pad time series to equal length before creating dataset."
+            )
+        
+        # Check if we have enough data
+        min_length = seq_length + embargo + 1
+        if len(dates) < min_length:
+            raise ValueError(f"Not enough timesteps. Need {min_length}, have {len(dates)}")
+        
+        # Create sliding windows
+        self.X = []
+        self.y = []
+        
+        for i in range(len(dates) - seq_length - embargo):
+            # Build input sequence
+            sequence_features = []
+            
+            for t in range(seq_length):
+                idx = i + t
+                
+                # Collect values for all series at this timestep
+                timestep_features = []
+                
+                # Add all series values
+                timestep_features.extend(values_matrix[idx, :])
+                
+                # Add all series features
+                if self.n_features_additional > 0:
+                    for feat in self.feature_cols:
+                        feat_values = df_features[feat].iloc[idx].values
+                        timestep_features.extend(feat_values)
+                
+                # Add temporal features (same for all series at this timestep)
+                date = dates[idx]
+                timestep_features.extend([date.year, date.month])
+                
+                sequence_features.append(timestep_features)
+            
+            self.X.append(np.array(sequence_features, dtype=np.float32))
+            
+            # Target: all series values at prediction timestep
+            target_idx = i + seq_length + embargo - 1
+            self.y.append(values_matrix[target_idx, :])
+        
+        self.X = np.array(self.X, dtype=np.float32)  # (n_samples, seq_length, n_features_total)
+        self.y = np.array(self.y, dtype=np.float32)  # (n_samples, n_series)
+        
+        print(f"  Created {len(self.X)} samples")
+        print(f"  Input shape: {self.X.shape}")
+        print(f"  Output shape: {self.y.shape}")
+        
+        # Validate no NaN in created samples
+        X_nans = np.isnan(self.X).sum()
+        y_nans = np.isnan(self.y).sum()
+        if X_nans > 0 or y_nans > 0:
+            raise ValueError(f"NaN values found in samples! X: {X_nans}, y: {y_nans}")
+        
+        # Train-test split (chronological)
+        n_samples = len(self.X)
+        train_size = int(n_samples * train_ratio)
+        
+        if train:
+            self.X = self.X[:train_size]
+            self.y = self.y[:train_size]
+        else:
+            self.X = self.X[train_size:]
+            self.y = self.y[train_size:]
+        
+        # Standardization
+        self.scaler_X = StandardScaler()
+        self.scaler_y = StandardScaler()
+        
+        # Separate features for scaling
+        # Don't scale temporal features (year, month)
+        n_samples, seq_len, n_feats = self.X.shape
+        n_continuous = self.n_series * (1 + self.n_features_additional)
+        
+        # Extract continuous features (values + features, exclude year/month)
+        X_continuous = self.X[:, :, :n_continuous].reshape(-1, n_continuous)
+        X_temporal = self.X[:, :, n_continuous:].reshape(-1, 2)
+        
+        if train:
+            # Fit and transform on training data
+            X_continuous_scaled = self.scaler_X.fit_transform(X_continuous)
+            X_continuous_scaled = X_continuous_scaled.reshape(n_samples, seq_len, n_continuous)
+            X_temporal_reshaped = X_temporal.reshape(n_samples, seq_len, 2)
+            
+            self.X = np.concatenate([X_continuous_scaled, X_temporal_reshaped], axis=2)
+            self.y = self.scaler_y.fit_transform(self.y)
+        else:
+            # Transform using training scalers
+            if scaler_X is not None and scaler_y is not None:
+                self.scaler_X = scaler_X
+                self.scaler_y = scaler_y
+                
+                X_continuous_scaled = self.scaler_X.transform(X_continuous)
+                X_continuous_scaled = X_continuous_scaled.reshape(n_samples, seq_len, n_continuous)
+                X_temporal_reshaped = X_temporal.reshape(n_samples, seq_len, 2)
+                
+                self.X = np.concatenate([X_continuous_scaled, X_temporal_reshaped], axis=2)
+                self.y = self.scaler_y.transform(self.y)
+        
+        # Final validation after scaling
+        X_nans_final = np.isnan(self.X).sum()
+        y_nans_final = np.isnan(self.y).sum()
+        if X_nans_final > 0 or y_nans_final > 0:
+            raise ValueError(f"NaN values after scaling! X: {X_nans_final}, y: {y_nans_final}")
+        
+        print(f"  Scaled dataset size: {len(self.X)} samples")
+        print(f"  ✓ No NaN values in final dataset")
+    
+    def __len__(self):
+        return len(self.X)
+    
+    def __getitem__(self, idx):
+        return torch.FloatTensor(self.X[idx]), torch.FloatTensor(self.y[idx])
+
+
 def train_epoch(model, loader, criterion, optimizer, device):
 
     # Enable training mode

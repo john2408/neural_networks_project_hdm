@@ -80,24 +80,85 @@ def apply_timeseries_cleaning(df: pd.DataFrame) -> pd.DataFrame:
     # All negative values are set to zero
     df.loc[df["Value"] < 0, "Value"] = 0
 
+    # For repetead ts_key and Date, take the mean value
+    df = df.groupby(['ts_key', 'Date'], as_index=False)['Value'].mean()
+
     print("Final shape after cleaning:", df.shape)
     print("Final number of unique ts_keys:", df['ts_key'].nunique())
 
     return df
 
-def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
+
+# For Multivariate Forecasting, all ts must have the same length
+def pad_timeseries_to_same_length(df):
+    """
+    Pad all time series to have the same length by adding zero-padded rows
+    at the beginning and end for series that start later or end earlier.
+    
+    Input DataFrame must have columns: Date, ts_key, Value
+    This represents model classes that were not yet available at earlier dates,
+    or were discontinued before the end date.
+    """
+    # Get global date range
+    min_date = df['Date'].min()
+    max_date = df['Date'].max()
+    all_dates = pd.date_range(start=min_date, end=max_date, freq='ME')
+    
+    print(f"\nPadding time series to same length:")
+    print(f"  Global date range: {min_date} to {max_date}")
+    print(f"  Total timesteps: {len(all_dates)}")
+    
+    # Get all unique time series keys
+    all_ts_keys = df['ts_key'].unique()
+    
+    # Create complete DataFrame with all dates for all time series
+    padded_rows = {}
+    
+    padded_rows['Date'] = []
+    padded_rows['ts_key'] = []
+    padded_rows['Value'] = []
+
+    for ts_key in all_ts_keys:
+        ts_data = df[df['ts_key'] == ts_key].sort_values('Date')
+        
+        missing_dates_start = set(all_dates) - set(ts_data['Date'])
+
+        padded_rows['Date'].extend(missing_dates_start)
+        padded_rows['ts_key'].extend([ts_key] * len(missing_dates_start))
+        padded_rows['Value'].extend([0.0] * len(missing_dates_start))
+    
+
+    # Combine original data with padded rows
+    if padded_rows:
+        df_padded = pd.concat([df, pd.DataFrame(padded_rows)], ignore_index=True)
+        df_padded = df_padded.sort_values(['ts_key', 'Date']).reset_index(drop=True)
+        print(f"  Padding added for {len(padded_rows['Date'])} missing timesteps across series")
+    else:
+        df_padded = df.copy()
+        print(f"  No padding needed - all series span full date range")
+    
+    # Validate all time series now have same length
+    ts_lengths = df_padded.groupby('ts_key').size()
+    assert ts_lengths.nunique() == 1, f"Time series have different lengths:\n{ts_lengths.value_counts()}"
+    print(f"  ✓ All {len(all_ts_keys)} time series now have {ts_lengths.iloc[0]} timesteps")
+    
+    return df_padded
+
+def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = False) -> pd.DataFrame:
     """add all features to KBA dataframe to create gold dataframe"""
 
     # First load KBA data
     kba_df = pd.read_parquet(config.kba_data_path, engine="pyarrow")
-
-    kba_df = apply_timeseries_cleaning(kba_df)
-
-    
-
     columns_to_keep = ["Date", "ts_key", "Value"]
 
     df_gold = kba_df[columns_to_keep].copy()
+
+    df_gold = apply_timeseries_cleaning(df_gold)
+
+    if zero_padding:
+        df_gold = pad_timeseries_to_same_length(df_gold)
+
+
 
     if config.include_employment_level:
         employment_level_df = pd.read_parquet(config.employment_level_path, engine="pyarrow")
@@ -170,9 +231,11 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
     
     validate_no_missing_values(df_gold, "None")
 
-    assert (
-        df_gold.shape[0] == kba_df.shape[0]
-    ), "Row count mismatch after merging features. Please check the merge operations."
+    if not zero_padding:
+        # Ensure row count matches original KBA data if no padding applied
+        assert (
+            df_gold.shape[0] == kba_df.shape[0]
+            ), "Row count mismatch after merging features. Please check the merge operations."
 
     # Sort by ts_key and Date
     df_gold = df_gold.sort_values(by=["ts_key", "Date"]).reset_index(drop=True)
@@ -183,12 +246,20 @@ def create_gold_dataframe(config: GoldDataFrameConfig) -> pd.DataFrame:
 
 if __name__ == "__main__":
 
+    zero_padding = True  # Set to True to enable zero padding of time series
+
     config = GoldDataFrameConfig()
 
-    df_gold = create_gold_dataframe(config)
+    df_gold = create_gold_dataframe(config, zero_padding=zero_padding)
+
+    
+    if zero_padding: 
+        file_name = "monthly_registration_volume_gold_padding.parquet"
+    else: 
+        file_name = "monthly_registration_volume_gold.parquet"
 
     output_path = os.path.join(
-        os.getcwd(), "data/gold", "monthly_registration_volume_gold.parquet"
+        os.getcwd(), "data/gold", file_name
     )
     df_gold.to_parquet(output_path, engine="pyarrow", index=False)
     print(f"Gold DataFrame saved to {output_path}")

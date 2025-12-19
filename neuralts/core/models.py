@@ -255,6 +255,115 @@ class CNN1DForecaster(nn.Module):
         return out
 
 
+class MLPMultivariate(nn.Module):
+    """
+    MLP for Multivariate time series forecasting using FLATTENING approach.
+    
+    Instead of one-hot encoding, this model flattens all time series values
+    into a single input vector, learning cross-series relationships directly.
+    
+    Architecture:
+        Input Flattening -> MLP Layers (ReLU) -> Output Layer
+    
+    Input structure (flattened):
+        [Value^1_t-L, ..., Value^1_t-1, Value^2_t-L, ..., Value^N_t-1,
+         Feature^1_t-L, ..., Feature^N_t-1, Year, Month]
+    
+    This is more efficient than one-hot encoding for datasets with many time series.
+    
+    Key difference from other models:
+    - Does NOT use one-hot encoding for time series identity
+    - Flattens all series values across the sequence dimension
+    - Learns relationships between different time series
+    """
+    def __init__(self, input_size, n_series, n_features_additional=0, 
+                 num_layers=2, hidden_size=512, dropout=0.2):
+        """
+        Args:
+            input_size: Sequence length (lookback window)
+            n_series: Number of time series
+            n_features_additional: Number of additional features per timestep
+            num_layers: Number of MLP layers
+            hidden_size: Number of units in each MLP layer
+            dropout: Dropout rate
+        """
+        super(MLPMultivariate, self).__init__()
+        
+        self.input_size = input_size
+        self.n_series = n_series
+        self.n_features_additional = n_features_additional
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+        
+        # Calculate input dimension after flattening
+        # For each timestep: n_series values + n_series * n_features_additional
+        # Plus 2 temporal features (year, month) shared across all series
+        self.input_dim = (
+            n_series * input_size +  # All series values across sequence
+            n_series * n_features_additional * input_size +  # All features across sequence
+            2  # Temporal features (year, month) from last timestep
+        )
+        
+        # Build MLP layers
+        layers = []
+        
+        # First layer
+        layers.append(nn.Linear(self.input_dim, hidden_size))
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
+        
+        # Hidden layers
+        for _ in range(num_layers - 1):
+            layers.append(nn.Linear(hidden_size, hidden_size))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+        
+        self.mlp = nn.Sequential(*layers)
+        
+        # Output layer: predict all n_series at once
+        self.out = nn.Linear(hidden_size, n_series)
+    
+    def forward(self, x):
+        """
+        Args:
+            x: Input tensor of shape (batch_size, seq_length, n_features)
+               where n_features = n_series + n_series * n_features_additional + 2
+               
+               Structure per timestep:
+               [value_series1, value_series2, ..., value_seriesN,
+                feat1_series1, feat2_series1, ..., featK_series1,
+                feat1_series2, ..., featK_seriesN,
+                year, month]
+        
+        Returns:
+            predictions: (batch_size, n_series) - one prediction per series
+        """
+        batch_size = x.size(0)
+        
+        # Extract temporal features from last timestep
+        temporal_features = x[:, -1, -2:]  # (batch_size, 2) - [year, month]
+        
+        # Extract values and features (exclude temporal from each timestep)
+        x_without_temporal = x[:, :, :-2]  # (batch_size, seq_length, n_series + n_series*n_features)
+        
+        # Flatten across sequence dimension
+        x_flat = x_without_temporal.reshape(batch_size, -1)  # (batch_size, seq_length * (n_series + n_series*n_features))
+        
+        # Concatenate with temporal features
+        x_input = torch.cat([x_flat, temporal_features], dim=1)  # (batch_size, input_dim)
+        
+        # Pass through MLP
+        x = self.mlp(x_input)  # (batch_size, hidden_size)
+        
+        # Output predictions for all series
+        predictions = self.out(x)  # (batch_size, n_series)
+        
+        # Return predictions (shape matches other models: (batch_size, 1) for single series prediction)
+        # For multivariate: we need to extract the specific series prediction
+        # This will be handled in the dataset/training loop
+        return predictions
+
+
 class PositionalEncoding(nn.Module):
     """
     Positional encoding for Transformer model.

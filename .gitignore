@@ -6,6 +6,7 @@ data/
 .DS_Store
 report/_build/
 models/
+lightning_logs/
 
 # C extensions
 *.so

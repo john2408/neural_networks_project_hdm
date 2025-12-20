@@ -691,3 +691,335 @@ def generate_out_of_sample_predictions(
     print(f"Optimization: {len(valid_ts_keys) * max_horizon} individual predictions → {max_horizon} batched forward passes")
     
     return predictions_dict, actuals_dict, all_preds, all_acts
+
+
+def create_model_from_trial(model_type, trial, n_series, n_features_additional, seq_length):
+    """
+    Create a model instance based on trial hyperparameters.
+    
+    Args:
+        model_type: Model architecture name
+        trial: Optuna trial object
+        n_series: Number of time series
+        n_features_additional: Number of additional features per series
+        seq_length: Sequence length
+    
+    Returns:
+        model: Instantiated model
+        hyperparams: Dict of hyperparameters used
+    """
+    from neuralts.core.models import (
+        MLPMultivariate, LSTMForecasterMultivariate,
+        RNNForecasterMultivariate, GRUForecasterMultivariate,
+        CNN1DForecasterMultivariate, TransformerForecasterMultivariate
+    )
+    
+    if model_type == 'MLPMultivariate':
+        num_layers = trial.suggest_int('num_layers', 1, 4)
+        hidden_size = trial.suggest_categorical('hidden_size', [128, 256, 512, 1024])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = MLPMultivariate(
+            input_size=seq_length,
+            n_series=n_series,
+            n_features_additional=n_features_additional,
+            num_layers=num_layers,
+            hidden_size=hidden_size,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'LSTMMultivariate':
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        hidden_size = trial.suggest_categorical('hidden_size', [64, 128, 256])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = LSTMForecasterMultivariate(
+            input_size=seq_length,
+            n_series=n_series,
+            n_features_additional=n_features_additional,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'RNNMultivariate':
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        hidden_size = trial.suggest_categorical('hidden_size', [64, 128, 256])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = RNNForecasterMultivariate(
+            input_size=seq_length,
+            n_series=n_series,
+            n_features_additional=n_features_additional,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'GRUMultivariate':
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        hidden_size = trial.suggest_categorical('hidden_size', [64, 128, 256])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = GRUForecasterMultivariate(
+            input_size=seq_length,
+            n_series=n_series,
+            n_features_additional=n_features_additional,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'CNN1DMultivariate':
+        num_layers = trial.suggest_int('num_layers', 2, 4)
+        hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = CNN1DForecasterMultivariate(
+            input_size=seq_length,
+            n_series=n_series,
+            n_features_additional=n_features_additional,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'TransformerMultivariate':
+        d_model = trial.suggest_categorical('d_model', [32, 64, 128])
+        nhead = trial.suggest_categorical('nhead', [2, 4, 8])
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        dim_feedforward = trial.suggest_categorical('dim_feedforward', [128, 256, 512])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        # Ensure d_model is divisible by nhead
+        if d_model % nhead != 0:
+            d_model = nhead * (d_model // nhead)
+        
+        model = TransformerForecasterMultivariate(
+            input_size=seq_length,
+            n_series=n_series,
+            n_features_additional=n_features_additional,
+            d_model=d_model,
+            nhead=nhead,
+            num_layers=num_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout
+        )
+        hyperparams = {
+            'd_model': d_model,
+            'nhead': nhead,
+            'num_layers': num_layers,
+            'dim_feedforward': dim_feedforward,
+            'dropout': dropout
+        }
+    
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    return model, hyperparams
+
+
+def create_univariate_model_from_trial(model_type, trial, input_size, seq_length):
+    """
+    Create a univariate model instance based on trial hyperparameters.
+    
+    Args:
+        model_type: Model architecture name (LSTM, RNN, GRU, CNN1D, MLP, Transformer, TransformerCLS)
+        trial: Optuna trial object
+        input_size: Number of input features (including one-hot encoding)
+        seq_length: Sequence length
+    
+    Returns:
+        model: Instantiated model
+        hyperparams: Dict of hyperparameters used
+    """
+    from neuralts.core.models import (
+        LSTMForecaster, RNNForecaster, GRUForecaster,
+        CNN1DForecaster, MLPForecaster,
+        TransformerForecaster, TransformerForecasterCLS
+    )
+    
+    if model_type == 'LSTM':
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128, 256])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = LSTMForecaster(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'RNN':
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128, 256])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = RNNForecaster(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'GRU':
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128, 256])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = GRUForecaster(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'CNN1D':
+        num_layers = trial.suggest_int('num_layers', 2, 4)
+        hidden_size = trial.suggest_categorical('hidden_size', [32, 64, 128, 256])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = CNN1DForecaster(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'MLP':
+        num_layers = trial.suggest_int('num_layers', 2, 4)
+        hidden_size = trial.suggest_categorical('hidden_size', [128, 256, 512, 1024])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        model = MLPForecaster(
+            input_size=input_size,
+            seq_length=seq_length,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        hyperparams = {'num_layers': num_layers, 'hidden_size': hidden_size, 'dropout': dropout}
+    
+    elif model_type == 'Transformer':
+        d_model = trial.suggest_categorical('d_model', [32, 64, 128])
+        nhead = trial.suggest_categorical('nhead', [2, 4, 8])
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        dim_feedforward = trial.suggest_categorical('dim_feedforward', [128, 256, 512])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        # Ensure d_model is divisible by nhead
+        if d_model % nhead != 0:
+            d_model = nhead * (d_model // nhead)
+        
+        model = TransformerForecaster(
+            input_size=input_size,
+            d_model=d_model,
+            nhead=nhead,
+            num_layers=num_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout
+        )
+        hyperparams = {
+            'd_model': d_model,
+            'nhead': nhead,
+            'num_layers': num_layers,
+            'dim_feedforward': dim_feedforward,
+            'dropout': dropout
+        }
+    
+    elif model_type == 'TransformerCLS':
+        d_model = trial.suggest_categorical('d_model', [32, 64, 128])
+        nhead = trial.suggest_categorical('nhead', [2, 4, 8])
+        num_layers = trial.suggest_int('num_layers', 1, 3)
+        dim_feedforward = trial.suggest_categorical('dim_feedforward', [128, 256, 512])
+        dropout = trial.suggest_float('dropout', 0.1, 0.5)
+        
+        # Ensure d_model is divisible by nhead
+        if d_model % nhead != 0:
+            d_model = nhead * (d_model // nhead)
+        
+        model = TransformerForecasterCLS(
+            input_size=input_size,
+            d_model=d_model,
+            nhead=nhead,
+            num_layers=num_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout
+        )
+        hyperparams = {
+            'd_model': d_model,
+            'nhead': nhead,
+            'num_layers': num_layers,
+            'dim_feedforward': dim_feedforward,
+            'dropout': dropout
+        }
+    
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    return model, hyperparams
+
+
+def train_with_early_stopping(model, train_loader, val_loader, device, 
+                               learning_rate=0.001, weight_decay=1e-5,
+                               max_epochs=30, patience=5):
+    """
+    Train model with early stopping.
+    
+    Args:
+        model: PyTorch model
+        train_loader: Training data loader
+        val_loader: Validation data loader
+        device: torch.device
+        learning_rate: Learning rate
+        weight_decay: L2 regularization
+        max_epochs: Maximum training epochs
+        patience: Early stopping patience
+    
+    Returns:
+        best_val_loss: Best validation loss achieved
+        best_model_state: State dict of best model
+    """
+    import torch.nn as nn
+    import torch.optim as optim
+    
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    
+    best_val_loss = float('inf')
+    patience_counter = 0
+    best_model_state = None
+    
+    for epoch in range(max_epochs):
+        # Training
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
+        
+        # Validation
+        val_loss = evaluate(model, val_loader, criterion, device)
+        
+        # Learning rate scheduling
+        scheduler.step(val_loss)
+        
+        # Early stopping check
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            best_model_state = model.state_dict().copy()
+        else:
+            patience_counter += 1
+        
+        if patience_counter >= patience:
+            break
+    
+    return best_val_loss, best_model_state

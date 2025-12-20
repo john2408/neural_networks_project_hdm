@@ -7,7 +7,9 @@ import warnings
 import time
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
-from neuralts.core.models import MLPMultivariate, LSTMForecasterMultivariate
+from neuralts.core.models import (MLPMultivariate, LSTMForecasterMultivariate,
+                                   RNNForecasterMultivariate, GRUForecasterMultivariate,
+                                   CNN1DForecasterMultivariate, TransformerForecasterMultivariate)
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import TimeSeriesDatasetFlattened, train_epoch, evaluate
 
@@ -31,11 +33,34 @@ if __name__ == "__main__":
     BATCH_SIZE = 32  # Smaller batch for flattened approach
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
-    MLP_LAYERS = 128
+
+    MLP_LAYERS = 2
     MLP_HIDDEN_SIZE = 512
-    LSTM_LAYERS = 64
+    MLP_DROPOUT = 0.2
+
+    LSTM_LAYERS = 2
     LSTM_HIDDEN_SIZE = 128
-    MODEL = 'MLPMultivariate'  # Options: 'BASELINE', 'MLPMultivariate', 'LSTMMultivariate'
+    LSTM_DROPOUT = 0.2
+
+    RNN_LAYERS = 2
+    RNN_HIDDEN_SIZE = 128
+    RNN_DROPOUT = 0.2
+
+    GRU_LAYERS = 2
+    GRU_HIDDEN_SIZE = 128
+    GRU_DROPOUT = 0.2
+
+    CNN_LAYERS = 3
+    CNN_HIDDEN_SIZE = 64
+    CNN_DROPOUT = 0.2
+
+    TRANSFORMER_D_MODEL = 64
+    TRANSFORMER_NHEAD = 4
+    TRANSFORMER_LAYERS = 2
+    TRANSFORMER_DIM_FEEDFORWARD = 256
+    TRANSFORMER_DROPOUT = 0.2
+
+    MODEL = 'TransformerMultivariate'  # Options: 'BASELINE', 'MLPMultivariate', 'LSTMMultivariate', 'RNNMultivariate', 'GRUMultivariate', 'CNN1DMultivariate', 'TransformerMultivariate'
 
 
     # ========================================================================
@@ -266,7 +291,7 @@ if __name__ == "__main__":
                     n_features_additional=n_features_additional,
                     num_layers=MLP_LAYERS,
                     hidden_size=MLP_HIDDEN_SIZE,
-                    dropout=0.2
+                    dropout=MLP_DROPOUT
                 ).to(device)
                 print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
                 print(f"Input dimension: {model.input_dim}")
@@ -279,7 +304,61 @@ if __name__ == "__main__":
                     n_features_additional=n_features_additional,
                     hidden_size=LSTM_HIDDEN_SIZE,
                     num_layers=LSTM_LAYERS,
-                    dropout=0.2
+                    dropout=LSTM_DROPOUT
+                ).to(device)
+                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+                print(f"Features per timestep: {model.features_per_timestep}")
+                print(f"Output dimension: {n_series} (all series)")
+            
+            elif MODEL == 'RNNMultivariate':
+                model = RNNForecasterMultivariate(
+                    input_size=SEQ_LENGTH,
+                    n_series=n_series,
+                    n_features_additional=n_features_additional,
+                    hidden_size=RNN_HIDDEN_SIZE,
+                    num_layers=RNN_LAYERS,
+                    dropout=RNN_DROPOUT
+                ).to(device)
+                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+                print(f"Features per timestep: {model.features_per_timestep}")
+                print(f"Output dimension: {n_series} (all series)")
+            
+            elif MODEL == 'GRUMultivariate':
+                model = GRUForecasterMultivariate(
+                    input_size=SEQ_LENGTH,
+                    n_series=n_series,
+                    n_features_additional=n_features_additional,
+                    hidden_size=GRU_HIDDEN_SIZE,
+                    num_layers=GRU_LAYERS,
+                    dropout=GRU_DROPOUT
+                ).to(device)
+                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+                print(f"Features per timestep: {model.features_per_timestep}")
+                print(f"Output dimension: {n_series} (all series)")
+            
+            elif MODEL == 'CNN1DMultivariate':
+                model = CNN1DForecasterMultivariate(
+                    input_size=SEQ_LENGTH,
+                    n_series=n_series,
+                    n_features_additional=n_features_additional,
+                    hidden_size=CNN_HIDDEN_SIZE,
+                    num_layers=CNN_LAYERS,
+                    dropout=CNN_DROPOUT
+                ).to(device)
+                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+                print(f"Features per timestep: {model.features_per_timestep}")
+                print(f"Output dimension: {n_series} (all series)")
+            
+            elif MODEL == 'TransformerMultivariate':
+                model = TransformerForecasterMultivariate(
+                    input_size=SEQ_LENGTH,
+                    n_series=n_series,
+                    n_features_additional=n_features_additional,
+                    d_model=TRANSFORMER_D_MODEL,
+                    nhead=TRANSFORMER_NHEAD,
+                    num_layers=TRANSFORMER_LAYERS,
+                    dim_feedforward=TRANSFORMER_DIM_FEEDFORWARD,
+                    dropout=TRANSFORMER_DROPOUT
                 ).to(device)
                 print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
                 print(f"Features per timestep: {model.features_per_timestep}")
@@ -569,6 +648,48 @@ if __name__ == "__main__":
                     'n_features_additional': n_features_additional,
                     'num_layers': LSTM_LAYERS,
                     'hidden_size': LSTM_HIDDEN_SIZE,
+                    'ts_key_to_idx': ts_key_to_idx
+                })
+            
+            elif MODEL == 'RNNMultivariate':
+                checkpoint_data.update({
+                    'input_size': SEQ_LENGTH,
+                    'n_series': n_series,
+                    'n_features_additional': n_features_additional,
+                    'num_layers': RNN_LAYERS,
+                    'hidden_size': RNN_HIDDEN_SIZE,
+                    'ts_key_to_idx': ts_key_to_idx
+                })
+            
+            elif MODEL == 'GRUMultivariate':
+                checkpoint_data.update({
+                    'input_size': SEQ_LENGTH,
+                    'n_series': n_series,
+                    'n_features_additional': n_features_additional,
+                    'num_layers': GRU_LAYERS,
+                    'hidden_size': GRU_HIDDEN_SIZE,
+                    'ts_key_to_idx': ts_key_to_idx
+                })
+            
+            elif MODEL == 'CNN1DMultivariate':
+                checkpoint_data.update({
+                    'input_size': SEQ_LENGTH,
+                    'n_series': n_series,
+                    'n_features_additional': n_features_additional,
+                    'num_layers': CNN_LAYERS,
+                    'hidden_size': CNN_HIDDEN_SIZE,
+                    'ts_key_to_idx': ts_key_to_idx
+                })
+            
+            elif MODEL == 'TransformerMultivariate':
+                checkpoint_data.update({
+                    'input_size': SEQ_LENGTH,
+                    'n_series': n_series,
+                    'n_features_additional': n_features_additional,
+                    'd_model': TRANSFORMER_D_MODEL,
+                    'nhead': TRANSFORMER_NHEAD,
+                    'num_layers': TRANSFORMER_LAYERS,
+                    'dim_feedforward': TRANSFORMER_DIM_FEEDFORWARD,
                     'ts_key_to_idx': ts_key_to_idx
                 })
             

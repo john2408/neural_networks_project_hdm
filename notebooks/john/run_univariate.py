@@ -8,7 +8,7 @@ import time
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster, 
-                            CNN1DForecaster, TransformerForecaster, TransformerForecasterCLS)
+                            CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
 
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     BATCH_SIZE = 64
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
-    MODEL = 'BASELINE'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'Transformer', 'TransformerCLS', 'BASELINE'
+    MODEL = 'MLP'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'TransformerCLS', 'BASELINE'
 
 
     # ========================================================================
@@ -282,6 +282,14 @@ if __name__ == "__main__":
                     num_layers=3,
                     dropout=0.2
                 ).to(device)
+            elif MODEL == 'MLP':
+                model = MLPForecaster(
+                    input_size=INPUT_SIZE,
+                    seq_length=SEQ_LENGTH,
+                    hidden_size=512,
+                    num_layers=3,
+                    dropout=0.2
+                ).to(device)
             elif MODEL == 'Transformer':
                 model = TransformerForecaster(
                     input_size=INPUT_SIZE,
@@ -303,7 +311,7 @@ if __name__ == "__main__":
             else:
                 raise ValueError(f"Unsupported MODEL type: {MODEL}")
         
-                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+            print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
             
             train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
             val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)

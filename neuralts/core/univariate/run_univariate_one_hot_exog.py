@@ -24,6 +24,7 @@ if __name__ == "__main__":
 
     MODE = "UNI"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
     
+    PYTORCH_SEED = 42
     SEQ_LENGTH = 6
     TRAIN_RATIO = 0.8
     EMBARGO = 1
@@ -75,6 +76,13 @@ if __name__ == "__main__":
     df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold.parquet")
 
     # ========================================================================
+
+    torch.manual_seed(PYTORCH_SEED)
+    np.random.seed(PYTORCH_SEED)
+    torch.cuda.manual_seed_all(PYTORCH_SEED)
+    torch.backends.cudnn.deterministic = True # Ensures reproducibility
+    torch.backends.cudnn.benchmark = False # Ensures reproducibility
+
 
     SCRIPT_START_TIME = time.time()
 

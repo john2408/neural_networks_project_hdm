@@ -5,12 +5,13 @@ import numpy as np
 import pandas as pd
 import warnings
 import time
+import os
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
 from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster, 
                             CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
-from neuralts.core.func import TimeSeriesDatasetVectorized, generate_out_of_sample_predictions_vectorized, train_epoch, evaluate
+from neuralts.core.func import TimeSeriesDatasetVectorized, generate_out_of_sample_predictions_vectorized
 
 
 warnings.filterwarnings('ignore')
@@ -62,11 +63,19 @@ if __name__ == "__main__":
     N_TRIALS = 3  # Number of Optuna trials
     OPTUNA_TIMEOUT = 900  # Timeout in seconds 15 minutes
 
-    MODEL = 'LSTM'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
+    MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
 
     TOTAL_SCRIPT_RUNTIME = None
     TOTAL_TRAINING_TIME_FOLDS = dict()
     TOTAL_OPTIMIZATION_TIME = None
+
+
+    GLOBAL_PATH = os.getcwd()
+    OUTPUT_PATH = os.path.join(GLOBAL_PATH, "models", MODEL.lower() + "_multi_vec")
+    os.makedirs(OUTPUT_PATH, exist_ok=True)
+    df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold_padding.parquet")
+
+
 
     # ========================================================================
 
@@ -86,15 +95,7 @@ if __name__ == "__main__":
     print(f"Device: {device}")
 
 
-
-    # Load data
-    import os
-    cwd = os.getcwd()
-    full_path = os.path.join(cwd, "data", "gold", "monthly_registration_volume_gold_padding.parquet")
-    output_path = os.path.join(cwd, "models", MODEL.lower() + "_uni_vectorized")
-    os.makedirs(output_path, exist_ok=True)
-
-    df_full = pd.read_parquet(full_path, engine='pyarrow')
+    df_full = pd.read_parquet(df_path, engine='pyarrow')
     
     # Keep only required columns for vectorized dataset
     df_full = df_full[['Date', 'ts_key', 'Value']].copy()
@@ -298,13 +299,13 @@ if __name__ == "__main__":
         print(f"  Batch size: {BATCH_SIZE}")
         
         # Save optimization results
-        optuna_results_path = os.path.join(output_path, 'optuna_results.csv')
+        optuna_results_path = os.path.join(OUTPUT_PATH, 'optuna_results.csv')
         trials_df = study.trials_dataframe()
         trials_df.to_csv(optuna_results_path, index=False)
         print(f"\n✓ Saved Optuna results to: {optuna_results_path}")
         
         # Save best hyperparameters
-        best_params_path = os.path.join(output_path, 'best_hyperparameters.txt')
+        best_params_path = os.path.join(OUTPUT_PATH, 'best_hyperparameters.txt')
         with open(best_params_path, 'w') as f:
             f.write(f"Best Hyperparameters for {MODEL}\n")
             f.write("="*60 + "\n\n")
@@ -331,7 +332,7 @@ if __name__ == "__main__":
     for fold_idx, fold_config in enumerate(folds):
         
         # Fold Variables
-        fold_output_dir = os.path.join(output_path, f"fold_{fold_idx + 1}")
+        fold_output_dir = os.path.join(OUTPUT_PATH, f"fold_{fold_idx + 1}")
         os.makedirs(fold_output_dir, exist_ok=True)
 
         print("\n" + "="*80)
@@ -813,11 +814,11 @@ if __name__ == "__main__":
             # Load best model
             model.load_state_dict(best_model_state)
 
-            training_time = (time.time() - start_time) / 60.0  # in minutes
+            training_time = time.time() - start_time  # in seconds
 
             TOTAL_TRAINING_TIME_FOLDS[fold_config['name']] = training_time
             
-            print(f"\nTraining completed in {training_time:.1f} minutes")
+            print(f"\nTraining completed in {training_time:.1f} seconds")
             print(f"Best validation loss: {best_val_loss:.6f}")
             
             print(f"\nTraining completed in {time.time() - start_time:.1f}s")
@@ -1035,11 +1036,11 @@ if __name__ == "__main__":
         print(f"  {cat:>10}: {avg_pct:5.1f}% ± {std_pct:4.1f}% ({avg_count:.0f} series avg)")
     
     # Save SMAPE distribution summary
-    smape_dist_df.to_csv(os.path.join(output_path, 'smape_distribution.csv'), index=False)
+    smape_dist_df.to_csv(os.path.join(OUTPUT_PATH, 'smape_distribution.csv'), index=False)
     
-    print(f"\n✓ Saved metrics to: {output_path}/fold_metrics.csv")
-    print(f"✓ Saved summary to: {output_path}/summary_metrics.csv")
-    print(f"✓ Saved SMAPE distribution to: {output_path}/smape_distribution.csv")
+    print(f"\n✓ Saved metrics to: {OUTPUT_PATH}/fold_metrics.csv")
+    print(f"✓ Saved summary to: {OUTPUT_PATH}/summary_metrics.csv")
+    print(f"✓ Saved SMAPE distribution to: {OUTPUT_PATH}/smape_distribution.csv")
     
     # ========================================================================
     # FINAL RESULTS: Average metrics across all folds
@@ -1067,7 +1068,7 @@ if __name__ == "__main__":
     print(f"  SMAPE: {avg_metrics['smape']:.2f}% ± {std_metrics['smape']:.2f}%")
     
     # Save metrics to CSV
-    metrics_df.to_csv(os.path.join(output_path, 'fold_metrics.csv'), index=False)
+    metrics_df.to_csv(os.path.join(OUTPUT_PATH, 'fold_metrics.csv'), index=False)
     
     # Save summary
     summary_dict = {
@@ -1078,7 +1079,7 @@ if __name__ == "__main__":
                 std_metrics['r2'], std_metrics['smape']]
     }
     summary_df = pd.DataFrame(summary_dict)
-    summary_df.to_csv(os.path.join(output_path, 'summary_metrics.csv'), index=False)
+    summary_df.to_csv(os.path.join(OUTPUT_PATH, 'summary_metrics.csv'), index=False)
     
     # ========================================================================
     # SAVE COMPREHENSIVE RESULTS TO TXT FILE
@@ -1087,7 +1088,7 @@ if __name__ == "__main__":
     TOTAL_SCRIPT_RUNTIME = (time.time() - SCRIPT_START_TIME) / 60.0  # in minutes
     print(f"\nTotal script runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes")
 
-    results_txt_path = os.path.join(output_path, 'final_results_summary.txt')
+    results_txt_path = os.path.join(OUTPUT_PATH, 'final_results_summary.txt')
     
     with open(results_txt_path, 'w') as f:
         f.write("="*80 + "\n")
@@ -1107,7 +1108,7 @@ if __name__ == "__main__":
         # Training time per fold
         f.write("\nTraining Time per Fold:\n")
         for fold_name, training_time in TOTAL_TRAINING_TIME_FOLDS.items():
-            f.write(f"  {fold_name}: {training_time:.1f} minutes\n")
+            f.write(f"  {fold_name}: {training_time:.1f} seconds\n")
         
         f.write(f"\nTotal Script Runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes\n")
         f.write("\n")
@@ -1159,9 +1160,9 @@ if __name__ == "__main__":
         f.write("END OF REPORT\n")
         f.write("="*80 + "\n")
     
-    print(f"\n✓ Saved metrics to: {output_path}/fold_metrics.csv")
-    print(f"✓ Saved summary to: {output_path}/summary_metrics.csv")
-    print(f"✓ Saved final results summary to: {output_path}/final_results_summary.txt")
+    print(f"\n✓ Saved metrics to: {OUTPUT_PATH}/fold_metrics.csv")
+    print(f"✓ Saved summary to: {OUTPUT_PATH}/summary_metrics.csv")
+    print(f"✓ Saved final results summary to: {OUTPUT_PATH}/final_results_summary.txt")
     print("\n" + "="*80)
     
     

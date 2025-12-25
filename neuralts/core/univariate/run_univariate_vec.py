@@ -10,7 +10,7 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster, 
                             CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
-from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
+from neuralts.core.func import TimeSeriesDatasetVectorized, generate_out_of_sample_predictions_vectorized, train_epoch, evaluate
 
 
 warnings.filterwarnings('ignore')
@@ -59,10 +59,10 @@ if __name__ == "__main__":
 
     # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
     OPTIMIZE_HYPERPARAMETERS = True  # Set to False to skip optimization
-    N_TRIALS = 3  # Number of Optuna trials
-    OPTUNA_TIMEOUT = 3600  # Timeout in seconds (1 hour)
+    N_TRIALS = 10  # Number of Optuna trials
+    OPTUNA_TIMEOUT = 900  # Timeout in seconds 15 minutes
 
-    MODEL = 'KAN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
+    MODEL = 'LSTM'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
 
     # ========================================================================
 
@@ -85,23 +85,18 @@ if __name__ == "__main__":
     # Load data
     import os
     cwd = os.getcwd()
-    full_path = os.path.join(cwd, "data", "gold", "monthly_registration_volume_gold.parquet")
-    output_path = os.path.join(cwd, "models", MODEL.lower())
+    full_path = os.path.join(cwd, "data", "gold", "monthly_registration_volume_gold_padding.parquet")
+    output_path = os.path.join(cwd, "models", MODEL.lower() + "_uni_vectorized")
     os.makedirs(output_path, exist_ok=True)
 
     df_full = pd.read_parquet(full_path, engine='pyarrow')
-    df_full['Year'] = df_full['Date'].dt.year
-    df_full['Month'] = df_full['Date'].dt.month
-
-    date_col = 'Date'
-    ts_key_col = 'ts_key'
-    value_col = 'Value'
-    features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
     
-
-    #Validate not NaN or infinite values in features
-    assert not df_full[features].isna().any().any(), "NaN values found in features"
-    assert not np.isinf(df_full[features].select_dtypes(include=[np.number])).any().any(), "Infinite values found in features"
+    # Keep only required columns for vectorized dataset
+    df_full = df_full[['Date', 'ts_key', 'Value']].copy()
+    
+    # Validate not NaN or infinite values
+    assert not df_full['Value'].isna().any(), "NaN values found in Value column"
+    assert not np.isinf(df_full['Value']).any(), "Infinite values found in Value column"
 
     print("="*80)
     print("DATA OVERVIEW")
@@ -162,7 +157,7 @@ if __name__ == "__main__":
     
     if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
         import optuna
-        from neuralts.core.func import create_univariate_model_from_trial, train_with_early_stopping
+        from neuralts.core.func import create_univariate_model_from_trial, train_with_early_stopping_vectorized
         
         print("\n" + "="*80)
         print("HYPERPARAMETER OPTIMIZATION WITH OPTUNA")
@@ -178,19 +173,17 @@ if __name__ == "__main__":
         print(f"\nUsing {fold_config['name']} for optimization")
         print(f"  Training observations: {len(df_train):,}")
         
-        # Create datasets
-        train_dataset = TimeSeriesDataset(
+        # Create vectorized datasets
+        train_dataset = TimeSeriesDatasetVectorized(
             df_train,
-            feature_cols=features,
             seq_length=SEQ_LENGTH,
             embargo=EMBARGO,
             train=True,
             train_ratio=TRAIN_RATIO
         )
         
-        val_dataset = TimeSeriesDataset(
+        val_dataset = TimeSeriesDatasetVectorized(
             df_train,
-            feature_cols=features,
             seq_length=SEQ_LENGTH,
             train=False,
             embargo=EMBARGO,
@@ -199,7 +192,8 @@ if __name__ == "__main__":
             scaler_y=train_dataset.scaler_y
         )
         
-        INPUT_SIZE_OPT = train_dataset.X.shape[2]
+        # Input size: features per timestep (no one-hot encoding needed)
+        INPUT_SIZE_OPT = train_dataset.X.shape[3]  # Shape: (n_windows, n_series, seq_length, n_features)
         
         print(f"\nOptimization dataset:")
         print(f"  Training samples: {len(train_dataset):,}")
@@ -208,11 +202,11 @@ if __name__ == "__main__":
         
         def objective(trial):
             """
-            Optuna objective function for hyperparameter optimization.
+            Optuna objective function for hyperparameter optimization with vectorized batching.
             """
             # Suggest hyperparameters
             learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
-            batch_size = trial.suggest_categorical('batch_size', [32, 64, 128])
+            batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])  # Smaller batches for vectorized
             
             # Create model with trial hyperparameters
             model, hyperparams = create_univariate_model_from_trial(
@@ -220,13 +214,13 @@ if __name__ == "__main__":
             )
             model = model.to(device)
             
-            # Create data loaders
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            # Create data loaders with vectorized dataset
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
             
-            # Train with early stopping
-            best_val_loss, _ = train_with_early_stopping(
-                model, train_loader, val_loader, device,
+            # Train with vectorized early stopping
+            best_val_loss, _ = train_with_early_stopping_vectorized(
+                model, train_loader, val_loader, device, SEQ_LENGTH,
                 learning_rate=learning_rate,
                 weight_decay=WEIGHT_DECAY,
                 max_epochs=30,
@@ -634,32 +628,32 @@ if __name__ == "__main__":
             
         else:
             # -----------------------------------------------------------------
-            # STEP 1: Create datasets for model development (train/val split)
+            # STEP 1: Create VECTORIZED datasets for model development (train/val split)
             # -----------------------------------------------------------------
             print("\n" + "-"*60)
-            print("STEP 1: Creating datasets for model development")
+            print("STEP 1: Creating VECTORIZED datasets for model development")
             print("-"*60)
         
-            train_dataset = TimeSeriesDataset(
+            train_dataset = TimeSeriesDatasetVectorized(
                 df_train,
-                feature_cols=features, 
                 seq_length=SEQ_LENGTH,
                 embargo=EMBARGO,
                 train=True,
                 train_ratio=TRAIN_RATIO
             )
             
-            print(f"Training samples: {len(train_dataset):,}")
+            print(f"Training time windows: {len(train_dataset):,}")
+            print(f"Series per window: {train_dataset.n_series:,}")
+            print(f"Effective training samples: {len(train_dataset) * train_dataset.n_series:,}")
             
             # Save scalers and metadata
             scaler_X = train_dataset.scaler_X
             scaler_y = train_dataset.scaler_y
-            n_ts_keys = train_dataset.n_ts_keys
+            n_series = train_dataset.n_series
             ts_key_to_idx = train_dataset.ts_key_to_idx
             
-            test_dataset = TimeSeriesDataset(
+            test_dataset = TimeSeriesDatasetVectorized(
                 df_train,
-                feature_cols=features,
                 seq_length=SEQ_LENGTH,
                 train=False,
                 embargo=EMBARGO,
@@ -668,16 +662,19 @@ if __name__ == "__main__":
                 scaler_y=scaler_y
             )
             
-            print(f"Validation samples: {len(test_dataset):,}")
+            print(f"Validation time windows: {len(test_dataset):,}")
+            print(f"Effective validation samples: {len(test_dataset) * train_dataset.n_series:,}")
         
         # -----------------------------------------------------------------
-        # STEP 2: Initialize and train model
+        # STEP 2: Initialize and train model with VECTORIZED batching
         # -----------------------------------------------------------------
             print("\n" + "-"*60)
-            print(f"STEP 2: Training {MODEL} model")
+            print(f"STEP 2: Training {MODEL} model with VECTORIZED batching")
             print("-"*60)
             
-            INPUT_SIZE = train_dataset.X.shape[2]
+            # Input size: features per timestep (no one-hot encoding)
+            INPUT_SIZE = train_dataset.X.shape[3]  # (n_windows, n_series, seq_length, n_features)
+            print(f"Input size per timestep: {INPUT_SIZE} features")
             
             if MODEL == 'LSTM':
                 model = LSTMForecaster(
@@ -738,8 +735,12 @@ if __name__ == "__main__":
         
             print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
             
-            train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-            val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+            # Use smaller batch size for vectorized (each batch processes all series)
+            VECTORIZED_BATCH_SIZE = 16
+            train_loader = DataLoader(train_dataset, batch_size=VECTORIZED_BATCH_SIZE, shuffle=False)
+            val_loader = DataLoader(test_dataset, batch_size=VECTORIZED_BATCH_SIZE, shuffle=False)
+            
+            print(f"Batch size: {VECTORIZED_BATCH_SIZE} time windows (processes {VECTORIZED_BATCH_SIZE * n_series:,} predictions per batch)")
             
             criterion = nn.MSELoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
@@ -751,9 +752,43 @@ if __name__ == "__main__":
             
             start_time = time.time()
             
+            # Training loop with VECTORIZED batching
             for epoch in range(EPOCHS):
-                train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-                val_loss = evaluate(model, val_loader, criterion, device)
+                # Training
+                model.train()
+                total_train_loss = 0
+                
+                for X_batch, y_batch in train_loader:
+                    # X_batch: (batch_time, n_series, seq_length, n_features)
+                    # Reshape to (batch_time * n_series, seq_length, n_features)
+                    X_batch = X_batch.reshape(-1, SEQ_LENGTH, INPUT_SIZE).to(device)
+                    y_batch = y_batch.reshape(-1, 1).to(device)
+                    
+                    optimizer.zero_grad()
+                    predictions = model(X_batch)
+                    loss = criterion(predictions, y_batch)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
+                    
+                    total_train_loss += loss.item()
+                
+                train_loss = total_train_loss / len(train_loader)
+                
+                # Validation
+                model.eval()
+                total_val_loss = 0
+                
+                with torch.no_grad():
+                    for X_batch, y_batch in val_loader:
+                        X_batch = X_batch.reshape(-1, SEQ_LENGTH, INPUT_SIZE).to(device)
+                        y_batch = y_batch.reshape(-1, 1).to(device)
+                        
+                        predictions = model(X_batch)
+                        loss = criterion(predictions, y_batch)
+                        total_val_loss += loss.item()
+                
+                val_loss = total_val_loss / len(val_loader)
                 
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
@@ -773,6 +808,7 @@ if __name__ == "__main__":
             
             print(f"\nTraining completed in {time.time() - start_time:.1f}s")
             print(f"Best validation loss: {best_val_loss:.6f}")
+            print(f"Vectorized speedup: Processed {n_series:,} series simultaneously per time window!")
             
 
             # -----------------------------------------------------------------
@@ -786,15 +822,15 @@ if __name__ == "__main__":
             ].copy()
 
 
-            predictions_dict, actuals_dict, all_preds, all_acts = generate_out_of_sample_predictions(model=model,
+            predictions_dict, actuals_dict, all_preds, all_acts = generate_out_of_sample_predictions_vectorized(
+                model=model,
                 df_test_period=df_test_period,
                 df_full=df_full,
                 fold_config=fold_config,
-                features=features,
                 scaler_X=scaler_X,
                 scaler_y=scaler_y,
                 ts_key_to_idx=ts_key_to_idx,
-                n_ts_keys=n_ts_keys,
+                n_ts_keys=n_series,
                 seq_length=SEQ_LENGTH,
                 embargo=EMBARGO,
                 device=device
@@ -900,7 +936,7 @@ if __name__ == "__main__":
                 'dropout': 0.2,
                 'scaler_X': scaler_X,
                 'scaler_y': scaler_y,
-                'n_ts_keys': n_ts_keys,
+                'n_series': n_series,  # Updated from n_ts_keys to n_series for vectorized dataset
                 'ts_key_to_idx': ts_key_to_idx,
                 'seq_length': SEQ_LENGTH,
                 'fold_config': fold_config,

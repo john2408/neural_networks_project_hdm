@@ -28,19 +28,10 @@ dependencies = [
     "xlrd>=2.0.2",
 ]
 
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.black]
-line-length = 99
-include = '\.pyi?$'
-exclude = '''
-/(
-    \.git
-  | \.venv
-)/
-'''
-
-[tool.isort]
-profile = "black"
-known_first_party = ["neuralts"]
-force_sort_within_sections = true
+[tool.setuptools]
+packages = ["neuralts", "neuralts.core", "neuralts.data_preparation"]
 

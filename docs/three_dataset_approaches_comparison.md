@@ -75,47 +75,69 @@ Batching: Sequential time windows with all series together
 
 ## Part 2: Dataset Size Comparison
 
-Given: 1000 series × 60 timesteps, seq_length=6, embargo=1
+Given: 1000 series × 60 timesteps, seq_length=6, embargo=1, **test_period=3 months**
 
 ### Number of Samples
 
-**Available time windows per series:**
+**Total available time windows (before train-test split):**
 ```
-n_windows = n_timesteps - seq_length - embargo = 60 - 6 - 1 = 53
+n_windows_total = n_timesteps - seq_length - embargo 
+                = 60 - 6 - 1 
+                = 53 total windows
 ```
+
+**Training windows (with train_ratio=0.8 or explicit test period):**
+```
+# Using train_ratio=0.8 (typical)
+n_windows_train = int(53 × 0.8) = 42 windows
+n_windows_test = 53 - 42 = 11 windows
+
+# OR using explicit test period (3 months)
+n_windows_train = 53 - 3 = 50 windows  
+n_windows_test = 3 windows
+```
+
+**For this example, we'll use: 50 training windows, 3 test windows**
 
 #### TimeSeriesDataset
 ```python
-dataset_length = n_series × n_windows
-               = 1000 × 53
-               = 53,000 samples
+# Training set
+dataset_length_train = n_series × n_windows_train
+                     = 1000 × 50
+                     = 50,000 training samples
+
 ```
 
 Each sample: One series, one time window
 
 #### TimeSeriesDatasetFlattened
 ```python
-dataset_length = n_windows
-               = 53 samples
+# Training set
+dataset_length_train = n_windows_train
+                     = 50 training samples
+
 ```
 
 Each sample: All series, one time window (flattened)
 
 #### TimeSeriesDatasetVectorized
 ```python
-dataset_length = n_windows
-               = 53 samples
+# Training set
+dataset_length_train = n_windows_train
+                     = 50 training samples
+
+
 ```
 
 Each sample: All series, one time window (vectorized)
 
-### Sample Reduction Factor
+### Sample Reduction Factor (Training Set)
 
-| Dataset Type | Samples | Reduction vs Traditional |
-|--------------|---------|-------------------------|
-| TimeSeriesDataset | 53,000 | Baseline (1x) |
-| TimeSeriesDatasetFlattened | 53 | **1000x fewer** |
-| TimeSeriesDatasetVectorized | 53 | **1000x fewer** |
+| Dataset Type | Training Samples | Reduction vs Traditional |
+|--------------|------------------|-------------------------|
+| TimeSeriesDataset | 50,000 | Baseline (1x) |
+| TimeSeriesDatasetFlattened | 50 | **1000x fewer** |
+| TimeSeriesDatasetVectorized | 50 | **1000x fewer** |
 
 ---
 
@@ -412,14 +434,14 @@ Note: Actual training time also depends on:
 
 ## Part 8: Memory Comparison
 
-### Per-Sample Memory
+### Per-Sample Memory (Training Set)
 
 #### TimeSeriesDataset
 ```python
 X: (6, 1006) × 4 bytes = 24,144 bytes ≈ 24 KB
 y: (1,) × 4 bytes = 4 bytes
 Total per sample: ≈ 24 KB
-Total dataset: 53,000 × 24 KB = 1,272 MB
+Total training set: 50,000 × 24 KB = 1,200 MB
 ```
 
 #### TimeSeriesDatasetFlattened
@@ -427,7 +449,7 @@ Total dataset: 53,000 × 24 KB = 1,272 MB
 X: (6, 4002) × 4 bytes = 96,048 bytes ≈ 96 KB
 y: (1000,) × 4 bytes = 4,000 bytes ≈ 4 KB
 Total per sample: ≈ 100 KB
-Total dataset: 53 × 100 KB = 5.3 MB
+Total training set: 50 × 100 KB = 5.0 MB
 ```
 
 #### TimeSeriesDatasetVectorized
@@ -435,16 +457,16 @@ Total dataset: 53 × 100 KB = 5.3 MB
 X: (1000, 6, 1) × 4 bytes = 24,000 bytes ≈ 24 KB
 y: (1000,) × 4 bytes = 4,000 bytes ≈ 4 KB
 Total per sample: ≈ 28 KB
-Total dataset: 53 × 28 KB = 1.48 MB
+Total training set: 50 × 28 KB = 1.4 MB
 ```
 
-### Memory Efficiency
+### Memory Efficiency (Training Set)
 
 | Dataset Type | Total Memory | Memory vs Traditional |
 |--------------|--------------|----------------------|
-| TimeSeriesDataset | 1,272 MB | Baseline (1x) |
-| TimeSeriesDatasetFlattened | 5.3 MB | **240x less** |
-| TimeSeriesDatasetVectorized | 1.48 MB | **860x less** |
+| TimeSeriesDataset | 1,200 MB | Baseline (1x) |
+| TimeSeriesDatasetFlattened | 5.0 MB | **240x less** |
+| TimeSeriesDatasetVectorized | 1.4 MB | **857x less** |
 
 ---
 
@@ -591,7 +613,7 @@ Large-scale univariate forecasting like predicting thousands of product sales or
 ### Sample Organization
 
 ```
-TimeSeriesDataset: Series-first organization
+TimeSeriesDataset: Series-first organization (Training Set)
 ┌─────────────────────────────────────────────┐
 │ Sample 1:    Series A, Window 1             │
 │ Sample 2:    Series A, Window 2             │
@@ -600,26 +622,29 @@ TimeSeriesDataset: Series-first organization
 │ Sample 5:    Series B, Window 2             │
 │ Sample 6:    Series B, Window 3             │
 │ ...                                         │
-│ Sample 53000: Series ZZZ, Window 53         │
+│ Sample 50000: Series ZZZ, Window 50         │
 └─────────────────────────────────────────────┘
+(Last 3 windows reserved for test set)
 
-TimeSeriesDatasetFlattened: Time-first organization
+TimeSeriesDatasetFlattened: Time-first organization (Training Set)
 ┌─────────────────────────────────────────────┐
 │ Sample 1:  Window 1  [A, B, C, ..., ZZZ]    │
 │ Sample 2:  Window 2  [A, B, C, ..., ZZZ]    │
 │ Sample 3:  Window 3  [A, B, C, ..., ZZZ]    │
 │ ...                                         │
-│ Sample 53: Window 53 [A, B, C, ..., ZZZ]    │
+│ Sample 50: Window 50 [A, B, C, ..., ZZZ]    │
 └─────────────────────────────────────────────┘
+(Windows 51-53 reserved for test set)
 
-TimeSeriesDatasetVectorized: Time-first vectorized
+TimeSeriesDatasetVectorized: Time-first vectorized (Training Set)
 ┌─────────────────────────────────────────────┐
 │ Sample 1:  Window 1  [[A], [B], ..., [ZZZ]] │
 │ Sample 2:  Window 2  [[A], [B], ..., [ZZZ]] │
 │ Sample 3:  Window 3  [[A], [B], ..., [ZZZ]] │
 │ ...                                         │
-│ Sample 53: Window 53 [[A], [B], ..., [ZZZ]] │
+│ Sample 50: Window 50 [[A], [B], ..., [ZZZ]] │
 └─────────────────────────────────────────────┘
+(Windows 51-53 reserved for test set)
 ```
 
 ### Batching Visualization
@@ -699,7 +724,7 @@ dataset = TimeSeriesDataset(
     train_ratio=0.8
 )
 
-print(f"Dataset length: {len(dataset)}")  # 53,000
+print(f"Dataset length: {len(dataset)}")  # ~42,400 (with train_ratio=0.8)
 print(f"Sample shape: {dataset[0][0].shape}")  # (6, 1006)
 
 loader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -718,12 +743,12 @@ dataset = TimeSeriesDatasetFlattened(
     train_ratio=0.8
 )
 
-print(f"Dataset length: {len(dataset)}")  # 53
+print(f"Dataset length: {len(dataset)}")  # ~42 (with train_ratio=0.8)
 print(f"Sample shape: {dataset[0][0].shape}")  # (6, 4002)
 
 loader = DataLoader(dataset, batch_size=32, shuffle=True)
 X_batch, y_batch = next(iter(loader))
-print(f"Batch shape: {X_batch.shape}")  # (21, 6, 4002) - last batch
+print(f"Batch shape: {X_batch.shape}")  # (batch, 6, 4002)
 ```
 
 ### TimeSeriesDatasetVectorized
@@ -739,7 +764,7 @@ dataset = TimeSeriesDatasetVectorized(
     train_ratio=0.8
 )
 
-print(f"Dataset length: {len(dataset)}")  # 53
+print(f"Dataset length: {len(dataset)}")  # ~42 (with train_ratio=0.8)
 print(f"Sample shape: {dataset[0][0].shape}")  # (1000, 6, 1)
 
 loader = DataLoader(dataset, batch_size=16, shuffle=False)
@@ -843,8 +868,8 @@ TimeSeriesDataset    TimeSeriesDatasetFlattened    TimeSeriesDatasetVectorized
    [Slowest but               [Balanced                   [Fastest but
     most flexible]            approach]                  most restrictive]
         │                       │                              │
-   53,000 samples            53 samples                   53 samples
-   1,656 forward passes      2 forward passes             4 forward passes
+   50,000 samples            50 samples                   50 samples
+   1,563 forward passes      2 forward passes             4 forward passes
    Full feature support      No one-hot                   Univariate only
    5-15% GPU                 40-60% GPU                   80-95% GPU
 ```

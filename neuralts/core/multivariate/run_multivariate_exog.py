@@ -27,6 +27,8 @@ if __name__ == "__main__":
     # TRAINING PARAMETERS
     # ========================================================================
     
+    PYTORCH_SEED = 42
+
     SEQ_LENGTH = 6
     TRAIN_RATIO = 0.8
     EMBARGO = 1

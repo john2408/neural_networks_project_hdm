@@ -66,8 +66,13 @@ if __name__ == "__main__":
 
     MODEL = 'LSTM'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
 
+    TOTAL_SCRIPT_RUNTIME = None
+    TOTAL_TRAINING_TIME_FOLDS = dict()
+    TOTAL_OPTIMIZATION_TIME = None
+
     # ========================================================================
 
+    SCRIPT_START_TIME = time.time()
 
     # Check MPS availability
     if torch.backends.mps.is_available():
@@ -250,7 +255,10 @@ if __name__ == "__main__":
         )
         
         print("\nStarting optimization...")
+        OPTIMIZATION_START_TIME = time.time()
         study.optimize(objective, n_trials=N_TRIALS, timeout=OPTUNA_TIMEOUT, show_progress_bar=True)
+        TOTAL_OPTIMIZATION_TIME = (time.time() - OPTIMIZATION_START_TIME) / 60.0  # in minutes
+        print(f"\nOptimization completed in {TOTAL_OPTIMIZATION_TIME:.1f} minutes")
         
         print("\n" + "="*80)
         print("OPTIMIZATION RESULTS")
@@ -545,9 +553,11 @@ if __name__ == "__main__":
             # Load best model
             model.load_state_dict(best_model_state)
 
-            training_time = time.time() - start_time
+            training_time = (time.time() - start_time) / 60.0  # in minutes
+
+            TOTAL_TRAINING_TIME_FOLDS[fold_config['name']] = training_time
             
-            print(f"\nTraining completed in {training_time:.1f}s")
+            print(f"\nTraining completed in {training_time:.1f} minutes")
             print(f"Best validation loss: {best_val_loss:.6f}")
             
 
@@ -805,6 +815,9 @@ if __name__ == "__main__":
     }
     summary_df = pd.DataFrame(summary_dict)
     summary_df.to_csv(os.path.join(output_path, 'summary_metrics.csv'), index=False)
+
+    TOTAL_SCRIPT_RUNTIME = (time.time() - SCRIPT_START_TIME) / 60.0  # in minutes
+    print(f"\nTotal script runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes")
     
     # ========================================================================
     # SAVE COMPREHENSIVE RESULTS TO TXT FILE
@@ -822,7 +835,20 @@ if __name__ == "__main__":
             f.write("Best Hyperparameters:\n")
             for key, value in best_trial.params.items():
                 f.write(f"    {key}: {value}\n")
-        f.write(f"Model Training Time: {training_time:.1f} seconds\n\n")
+        
+        # Total optimization time
+        if OPTIMIZE_HYPERPARAMETERS and best_trial is not None:
+            f.write(f"\nTotal Hyperparameter Optimization Time: {TOTAL_OPTIMIZATION_TIME:.1f} minutes\n")
+
+        # Training time per fold
+        f.write("\nTraining Time per Fold:\n")
+        for fold_name, training_time in TOTAL_TRAINING_TIME_FOLDS.items():
+            f.write(f"  {fold_name}: {training_time:.1f} minutes\n")
+        
+        f.write(f"\nTotal Script Runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes\n")
+
+
+        f.write("\n" + "="*80 + "\n\n")
         
         # 1. FINAL RESULTS: AVERAGE METRICS ACROSS ALL FOLDS
         f.write("="*80 + "\n")

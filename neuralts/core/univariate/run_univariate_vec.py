@@ -59,13 +59,18 @@ if __name__ == "__main__":
 
     # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
     OPTIMIZE_HYPERPARAMETERS = True  # Set to False to skip optimization
-    N_TRIALS = 10  # Number of Optuna trials
+    N_TRIALS = 3  # Number of Optuna trials
     OPTUNA_TIMEOUT = 900  # Timeout in seconds 15 minutes
 
     MODEL = 'LSTM'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
 
+    TOTAL_SCRIPT_RUNTIME = None
+    TOTAL_TRAINING_TIME_FOLDS = dict()
+    TOTAL_OPTIMIZATION_TIME = None
+
     # ========================================================================
 
+    SCRIPT_START_TIME = time.time()
 
     # Check MPS availability
     if torch.backends.mps.is_available():
@@ -154,7 +159,7 @@ if __name__ == "__main__":
     # ========================================================================
     # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
     # ========================================================================
-    
+    best_trial = None
     if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
         import optuna
         from neuralts.core.func import create_univariate_model_from_trial, train_with_early_stopping_vectorized
@@ -236,9 +241,11 @@ if __name__ == "__main__":
             pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
         )
         
-        print("\nStarting optimization...")
+        OPTIMIZATION_START_TIME = time.time()
         study.optimize(objective, n_trials=N_TRIALS, timeout=OPTUNA_TIMEOUT, show_progress_bar=True)
-        
+        TOTAL_OPTIMIZATION_TIME = (time.time() - OPTIMIZATION_START_TIME) / 60.0  # in minutes
+        print(f"\nOptimization completed in {TOTAL_OPTIMIZATION_TIME:.1f} minutes")
+
         print("\n" + "="*80)
         print("OPTIMIZATION RESULTS")
         print("="*80)
@@ -805,6 +812,13 @@ if __name__ == "__main__":
             
             # Load best model
             model.load_state_dict(best_model_state)
+
+            training_time = (time.time() - start_time) / 60.0  # in minutes
+
+            TOTAL_TRAINING_TIME_FOLDS[fold_config['name']] = training_time
+            
+            print(f"\nTraining completed in {training_time:.1f} minutes")
+            print(f"Best validation loss: {best_val_loss:.6f}")
             
             print(f"\nTraining completed in {time.time() - start_time:.1f}s")
             print(f"Best validation loss: {best_val_loss:.6f}")
@@ -1070,6 +1084,9 @@ if __name__ == "__main__":
     # SAVE COMPREHENSIVE RESULTS TO TXT FILE
     # ========================================================================
     
+    TOTAL_SCRIPT_RUNTIME = (time.time() - SCRIPT_START_TIME) / 60.0  # in minutes
+    print(f"\nTotal script runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes")
+
     results_txt_path = os.path.join(output_path, 'final_results_summary.txt')
     
     with open(results_txt_path, 'w') as f:
@@ -1077,6 +1094,25 @@ if __name__ == "__main__":
         f.write(f"{MODEL} MODEL - FINAL EVALUATION RESULTS\n")
         f.write("="*80 + "\n\n")
         
+        f.write(f"Model: {MODEL}\n")
+        if best_trial is not None:
+            f.write("Best Hyperparameters:\n")
+            for key, value in best_trial.params.items():
+                f.write(f"    {key}: {value}\n")
+        
+        # Total optimization time
+        if OPTIMIZE_HYPERPARAMETERS and best_trial is not None:
+            f.write(f"\nTotal Hyperparameter Optimization Time: {TOTAL_OPTIMIZATION_TIME:.1f} minutes\n")
+
+        # Training time per fold
+        f.write("\nTraining Time per Fold:\n")
+        for fold_name, training_time in TOTAL_TRAINING_TIME_FOLDS.items():
+            f.write(f"  {fold_name}: {training_time:.1f} minutes\n")
+        
+        f.write(f"\nTotal Script Runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes\n")
+        f.write("\n")
+
+
         # 1. FINAL RESULTS: AVERAGE METRICS ACROSS ALL FOLDS
         f.write("="*80 + "\n")
         f.write("1. FINAL RESULTS: AVERAGE METRICS ACROSS ALL FOLDS\n")

@@ -189,7 +189,7 @@ def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = Fals
 
     # First load KBA data
     kba_df = pd.read_parquet(config.kba_data_path, engine="pyarrow")
-    columns_to_keep = ["Date", "ts_key", "Value"]
+    columns_to_keep = ["Date", "ts_key", "Value", "OEM", "Model", "drive_type"]
 
     df_gold = kba_df[columns_to_keep].copy()
 
@@ -282,13 +282,16 @@ def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = Fals
     # Sort by ts_key and Date
     df_gold = df_gold.sort_values(by=["ts_key", "Date"]).reset_index(drop=True)
 
+    # Add columns back "OEM", "Model", "drive_type"
+    # TODO
+
     return df_gold
 
 
 
 if __name__ == "__main__":
 
-    zero_padding = True  # Set to True to enable zero padding of time series
+    zero_padding = False  # Set to True to enable zero padding of time series
 
     config = GoldDataFrameConfig()
 

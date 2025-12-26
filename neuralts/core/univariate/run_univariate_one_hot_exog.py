@@ -113,7 +113,7 @@ if __name__ == "__main__":
     
     if MODE == "UNI":
         features = ['Year', 'Month']
-    elif MODE == "MULTI":
+    elif MODE == "EXO":
         features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
 
     #Validate not NaN or infinite values in features

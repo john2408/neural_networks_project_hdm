@@ -23,7 +23,8 @@ if __name__ == "__main__":
     # ========================================================================
 
     MODE = "UNI"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
-    
+    MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
+
     PYTORCH_SEED = 42
     SEQ_LENGTH = 6
     TRAIN_RATIO = 0.8
@@ -64,7 +65,6 @@ if __name__ == "__main__":
     N_TRIALS = 3  # Number of Optuna trials
     OPTUNA_TIMEOUT = 900  # Timeout in seconds (15 minutes)
 
-    MODEL = 'BASELINE'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
 
     TOTAL_SCRIPT_RUNTIME = None
     TOTAL_TRAINING_TIME_FOLDS = dict()
@@ -103,16 +103,15 @@ if __name__ == "__main__":
 
     # Load data
     df_full = pd.read_parquet(df_path, engine='pyarrow')
-    df_full['Year'] = df_full['Date'].dt.year
-    df_full['Month'] = df_full['Date'].dt.month
 
     date_col = 'Date'
     ts_key_col = 'ts_key'
     value_col = 'Value'
-    #features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
     
     if MODE == "UNI":
-        features = ['Year', 'Month']
+        features = ['sin_month', 'cos_month', 'scaled_year']
+        drop_cols = ['Year', 'Month']
+        df_full = df_full.drop(columns=drop_cols)
     elif MODE == "EXO":
         features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
 

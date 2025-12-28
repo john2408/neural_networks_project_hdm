@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import os
-
+import numpy as np
 import pandas as pd
 
 
@@ -287,6 +287,16 @@ def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = Fals
 
     # Add columns back "OEM", "Model", "drive_type"
     df_gold = df_gold.merge(df_map_ts_key, on="ts_key", how="left")
+
+    # Add sin(month) and cos(month) 
+    df_gold['Year'] = df_gold['Date'].dt.year
+    df_gold['Month'] = df_gold['Date'].dt.month
+    # df_gold['sin_month'] = np.sin(2 * np.pi * df_gold['Month'] / 12)
+    # df_gold['cos_month'] = np.cos(2 * np.pi * df_gold['Month'] / 12)
+
+    # # Add scaled year 
+    # df_gold['Year'] = df_gold['Date'].dt.year
+    # df_gold['scaled_year'] = (df_gold['Year'] - df_gold['Year'].min()) / (df_gold['Year'].max() - df_gold['Year'].min())    
 
     return df_gold
 

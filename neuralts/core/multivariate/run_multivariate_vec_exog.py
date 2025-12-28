@@ -32,7 +32,7 @@ if __name__ == "__main__":
     
     # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
     OPTIMIZE_HYPERPARAMETERS = True  # Set to False to skip optimization
-    N_TRIALS = 10  # Number of Optuna trials
+    N_TRIALS = 5  # Number of Optuna trials
     OPTUNA_TIMEOUT = 900  # Timeout in seconds 15 minutes
 
     SEQ_LENGTH = 6
@@ -111,6 +111,9 @@ if __name__ == "__main__":
 
 
     df_full = pd.read_parquet(df_path, engine='pyarrow')
+
+    # cols_to_drop = ['sin_month', 'cos_month', 'scaled_year']
+    # df_full = df_full.drop(columns=cols_to_drop)
     
     # Keep only required columns for vectorized dataset
     base_columns = ['Date', 'ts_key', 'Value']

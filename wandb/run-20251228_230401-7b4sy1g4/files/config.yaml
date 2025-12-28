@@ -1,0 +1,91 @@
+_wandb:
+    value:
+        cli_version: 0.23.1
+        e:
+            c3k3b145dmsgbbfmpdzohuhru2k63me1:
+                apple:
+                    ecpuCores: 4
+                    gpuCores: 20
+                    memoryGb: 48
+                    name: Apple M4 Pro
+                    pcpuCores: 10
+                    ramTotalBytes: "51539607552"
+                codePath: neuralts/core/univariate/run_univariate_one_hot_exog_wb.py
+                codePathLocal: neuralts/core/univariate/run_univariate_one_hot_exog_wb.py
+                cpu_count: 14
+                cpu_count_logical: 14
+                disk:
+                    /:
+                        total: "994662584320"
+                        used: "293823950848"
+                email: john.torres.consulting@gmail.com
+                executable: /Users/johtorr/Documents/Repos/neural_networks_project_hdm/.venv/bin/python
+                git:
+                    commit: 63d76735336b9499761892e588983cf05a644942
+                    remote: https://github.com/john2408/neural_networks_project_hdm.git
+                host: johns-macbook-pro.home
+                memory:
+                    total: "51539607552"
+                os: macOS-15.6.1-arm64-arm-64bit
+                program: /Users/johtorr/Documents/Repos/neural_networks_project_hdm/neuralts/core/univariate/run_univariate_one_hot_exog_wb.py
+                python: CPython 3.12.10
+                root: /Users/johtorr/Documents/Repos/neural_networks_project_hdm
+                startedAt: "2025-12-28T22:04:01.576069Z"
+                writerId: c3k3b145dmsgbbfmpdzohuhru2k63me1
+        m: []
+        python_version: 3.12.10
+        t:
+            "1":
+                - 1
+                - 5
+                - 35
+                - 53
+            "2":
+                - 1
+                - 5
+                - 35
+                - 53
+            "3":
+                - 2
+                - 13
+                - 16
+            "4": 3.12.10
+            "5": 0.23.1
+            "10":
+                - 20
+            "12": 0.23.1
+            "13": darwin-arm64
+batch_size:
+    value: 32
+dropout:
+    value: 0.14698629082193412
+embargo:
+    value: 1
+epochs:
+    value: 25
+fold:
+    value: Fold 2
+hidden_size:
+    value: 256
+learning_rate:
+    value: 0.0009728667457842906
+mode:
+    value: UNI
+model:
+    value: RNN
+n_features:
+    value: 2
+num_layers:
+    value: 1
+seq_length:
+    value: 6
+test_end:
+    value: "2025-03-31"
+test_start:
+    value: "2025-01-01"
+train_end:
+    value: "2024-12-31"
+train_ratio:
+    value: 0.8
+weight_decay:
+    value: 1e-05

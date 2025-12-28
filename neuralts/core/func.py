@@ -424,6 +424,299 @@ class TimeSeriesDatasetVectorized(Dataset):
         return torch.FloatTensor(self.X[idx]), torch.FloatTensor(self.y[idx])
 
 
+class TimeSeriesDatasetVectorizedExog(Dataset):
+    """
+    VECTORIZED Dataset for MULTIVARIATE time series forecasting with STATIC exogenous features.
+    
+    Extension of TimeSeriesDatasetVectorized that supports exogenous features that are:
+    - STATIC: Same value across all time series at each timestep
+    - GLOBAL: Shared economic indicators, policy variables, etc.
+    
+    Examples of static exogenous features:
+    - GDP growth rate (same for all automotive series in a country)
+    - Interest rates (same for all series)
+    - Policy changes (same impact across series)
+    
+    Key Differences from TimeSeriesDatasetVectorized:
+    -------------------------------------------------
+    - Supports exogenous features (Value + N exogenous features)
+    - Features must be static (validated during initialization)
+    - Shape: (n_series, seq_length, 1+N) instead of (n_series, seq_length, 1)
+    
+    Data Structure:
+    --------------
+    Sample at time index t:
+        Input X:  All series, time window [t:t+seq_length]
+                  Shape: (n_series, seq_length, n_features)
+                  where n_features = 1 (Value) + len(exog_cols)
+        Target y: All series, value at t+seq_length+embargo
+                  Shape: (n_series,)
+    
+    Example with 1000 series, seq_length=6, 3 exogenous features:
+        X.shape = (1000, 6, 4)  # Value + GDP + Interest_Rate + CPI
+        y.shape = (1000,)
+    
+    Note: Exogenous features are validated to be identical across all series at each timestep.
+    """
+    
+    def __init__(self, df, exog_cols=None, seq_length=6, embargo=1,
+                 train=True, train_ratio=0.8, scaler_X=None, scaler_y=None):
+        """
+        Args:
+            df: DataFrame with columns [Date, ts_key, Value, ...exogenous features]
+            exog_cols: List of exogenous feature column names (must be static across series)
+            seq_length: Lookback window size
+            embargo: Gap between last observation and prediction target
+            train: If True, create training set
+            train_ratio: Train/test split ratio
+            scaler_X: Pre-fitted StandardScaler for features (for test set)
+            scaler_y: Pre-fitted StandardScaler for targets (for test set)
+        """
+        # Validate dataframe columns
+        required_cols = {'Date', 'ts_key', 'Value'}
+        if exog_cols is None:
+            exog_cols = []
+        
+        expected_cols = required_cols | set(exog_cols)
+        if set(df.columns) != expected_cols:
+            raise ValueError(
+                f"DataFrame must have exactly these columns: {expected_cols}\n"
+                f"Found: {set(df.columns)}"
+            )
+        
+        self.seq_length = seq_length
+        self.embargo = embargo
+        self.exog_cols = exog_cols
+        self.n_exog = len(exog_cols)
+        
+        # Get unique time series
+        unique_ts_keys = sorted(df['ts_key'].unique())
+        self.n_series = len(unique_ts_keys)
+        self.ts_key_to_idx = {key: idx for idx, key in enumerate(unique_ts_keys)}
+        
+        print(f"\n{'='*70}")
+        print("Creating VECTORIZED dataset with STATIC exogenous features")
+        print(f"{'='*70}")
+        print(f"  Time series: {self.n_series:,}")
+        print(f"  Exogenous features: {self.n_exog} - {exog_cols}")
+        print(f"  Sequence length: {seq_length}, Embargo: {embargo}")
+        
+        # =====================================================================
+        # STEP 1: Validate static exogenous features
+        # =====================================================================
+        if self.n_exog > 0:
+            print("\n[1/6] Validating static exogenous features...")
+            
+            for exog_col in exog_cols:
+                # Check that each feature has the same value across all series at each date
+                unique_values_per_date = df.groupby('Date')[exog_col].nunique()
+                
+                if (unique_values_per_date > 1).any():
+                    problem_dates = unique_values_per_date[unique_values_per_date > 1].index.tolist()
+                    raise ValueError(
+                        f"Exogenous feature '{exog_col}' is not static!\n"
+                        f"Found different values across series at {len(problem_dates)} dates.\n"
+                        f"First problematic date: {problem_dates[0]}\n"
+                        f"Static features must have the same value for all time series at each timestep."
+                    )
+            
+            print(f"  ✓ All exogenous features are static (same across all series at each date)")
+        else:
+            print("\n[1/6] No exogenous features specified (univariate mode)")
+        
+        # =====================================================================
+        # STEP 2: Pivot data - align all series by date
+        # =====================================================================
+        print("\n[2/6] Pivoting data to align all series by date...")
+        
+        # Pivot values
+        df_pivot_values = df.pivot_table(
+            index='Date',
+            columns='ts_key',
+            values='Value',
+            aggfunc='first'
+        ).sort_index()
+        
+        # Extract dates and values matrix
+        dates = pd.to_datetime(df_pivot_values.index)
+        values_matrix = df_pivot_values.values  # Shape: (n_timesteps, n_series)
+        
+        # Pivot exogenous features (if any)
+        exog_matrices = {}
+        if self.n_exog > 0:
+            for exog_col in exog_cols:
+                # Since features are static, we only need one value per date
+                exog_series = df.groupby('Date')[exog_col].first().sort_index()
+                exog_matrices[exog_col] = exog_series.values  # Shape: (n_timesteps,)
+        
+        print(f"  Total timesteps: {len(dates)}")
+        print(f"  Value matrix shape: {values_matrix.shape}")
+        if self.n_exog > 0:
+            print(f"  Exogenous features: {self.n_exog}")
+        
+        # Check for missing data
+        nan_count = np.isnan(values_matrix).sum()
+        if nan_count > 0:
+            print(f"  WARNING: Found {nan_count} NaN values in pivoted data!")
+            print(f"  Filling NaN with forward fill + backward fill...")
+            df_pivot_values = df_pivot_values.fillna(method='ffill').fillna(method='bfill')
+            values_matrix = df_pivot_values.values
+            remaining_nans = np.isnan(values_matrix).sum()
+            if remaining_nans > 0:
+                raise ValueError(f"Still {remaining_nans} NaN values after filling!")
+        
+        # =====================================================================
+        # STEP 3: Create time-indexed windows with exogenous features
+        # =====================================================================
+        print("\n[3/6] Creating time-indexed windows with exogenous features...")
+        
+        min_length = seq_length + embargo + 1
+        if len(dates) < min_length:
+            raise ValueError(f"Not enough timesteps. Need {min_length}, have {len(dates)}")
+        
+        self.X = []  # Will store (n_windows, n_series, seq_length, n_features)
+        self.y = []  # Will store (n_windows, n_series)
+        
+        # Create one sample per time window (NOT per series!)
+        n_windows = len(dates) - seq_length - embargo
+        
+        for t in range(n_windows):
+            # Extract value window: (seq_length, n_series) -> (n_series, seq_length, 1)
+            values_window = values_matrix[t:t+seq_length, :].T[:, :, np.newaxis]
+            
+            # Add exogenous features if present
+            if self.n_exog > 0:
+                # For each exogenous feature, create (n_series, seq_length, 1)
+                exog_windows = []
+                for exog_col in exog_cols:
+                    # Shape: (seq_length,) -> broadcast to (n_series, seq_length, 1)
+                    exog_values = exog_matrices[exog_col][t:t+seq_length]
+                    exog_window = np.tile(exog_values, (self.n_series, 1))[:, :, np.newaxis]
+                    exog_windows.append(exog_window)
+                
+                # Concatenate all features: (n_series, seq_length, 1+n_exog)
+                window_features = np.concatenate([values_window] + exog_windows, axis=2)
+            else:
+                window_features = values_window
+            
+            self.X.append(window_features)
+            
+            # Target: all series at prediction timestep
+            target_idx = t + seq_length + embargo - 1
+            self.y.append(values_matrix[target_idx, :])
+        
+        self.X = np.array(self.X, dtype=np.float32)  # (n_windows, n_series, seq_length, n_features)
+        self.y = np.array(self.y, dtype=np.float32)  # (n_windows, n_series)
+        
+        print(f"  Created {len(self.X)} time windows")
+        print(f"  Input shape: {self.X.shape}")
+        print(f"  Output shape: {self.y.shape}")
+        
+        n_features_total = 1 + self.n_exog
+        print(f"  Features per series: {n_features_total}")
+        print(f"    - Value: 1")
+        if self.n_exog > 0:
+            print(f"    - Exogenous: {self.n_exog}")
+        
+        # =====================================================================
+        # STEP 4: Performance comparison
+        # =====================================================================
+        traditional_samples = self.n_series * n_windows
+        reduction_factor = traditional_samples / len(self.X)
+        
+        print(f"\n[4/6] Performance comparison:")
+        print(f"  Traditional approach would create: {traditional_samples:,} samples")
+        print(f"  Vectorized approach creates: {len(self.X)} time windows")
+        print(f"  Sample reduction: {reduction_factor:.0f}x fewer!")
+        print(f"  → With batch_size=16: {reduction_factor/16:.0f}x fewer forward passes")
+        print(f"  → Effective batch size: 16 × {self.n_series:,} = {16 * self.n_series:,} predictions per batch")
+        
+        # =====================================================================
+        # STEP 5: Train-test split (chronological)
+        # =====================================================================
+        print(f"\n[5/6] Train-test split...")
+        
+        n_samples = len(self.X)
+        train_size = int(n_samples * train_ratio)
+        
+        if train:
+            self.X = self.X[:train_size]
+            self.y = self.y[:train_size]
+            print(f"  Training set: {len(self.X)} time windows")
+        else:
+            self.X = self.X[train_size:]
+            self.y = self.y[train_size:]
+            print(f"  Test set: {len(self.X)} time windows")
+        
+        # =====================================================================
+        # STEP 6: Standardization
+        # =====================================================================
+        print(f"\n[6/6] Standardizing features...")
+        
+        self.scaler_X = StandardScaler()
+        self.scaler_y = StandardScaler()
+        
+        # Reshape for scaling: (n_windows, n_series, seq_length, n_features)
+        # → (n_windows × n_series × seq_length, n_features)
+        n_windows, n_series, seq_len, n_feats = self.X.shape
+        
+        # Flatten all dimensions except last for scaling
+        X_flat = self.X.reshape(-1, n_feats)
+        
+        if train:
+            # Fit and transform
+            X_scaled = self.scaler_X.fit_transform(X_flat)
+            self.X = X_scaled.reshape(n_windows, n_series, seq_len, n_feats)
+            
+            # Scale targets: (n_windows, n_series) → (n_windows × n_series, 1)
+            y_reshaped = self.y.reshape(-1, 1)
+            y_scaled = self.scaler_y.fit_transform(y_reshaped)
+            self.y = y_scaled.reshape(n_windows, n_series)
+            
+            print(f"  Fitted scalers on training data")
+        else:
+            # Transform using provided scalers
+            if scaler_X is not None and scaler_y is not None:
+                self.scaler_X = scaler_X
+                self.scaler_y = scaler_y
+                
+                X_scaled = self.scaler_X.transform(X_flat)
+                self.X = X_scaled.reshape(n_windows, n_series, seq_len, n_feats)
+                
+                y_reshaped = self.y.reshape(-1, 1)
+                y_scaled = self.scaler_y.transform(y_reshaped)
+                self.y = y_scaled.reshape(n_windows, n_series)
+                
+                print(f"  Applied training scalers to test data")
+            else:
+                print(f"  WARNING: No scalers provided for test set!")
+        
+        # Final validation
+        X_nans = np.isnan(self.X).sum()
+        y_nans = np.isnan(self.y).sum()
+        if X_nans > 0 or y_nans > 0:
+            raise ValueError(f"NaN values after scaling! X: {X_nans}, y: {y_nans}")
+        
+        print(f"  ✓ Standardization complete, no NaN values")
+        print(f"\n{'='*70}")
+        print("Dataset ready for training!")
+        print(f"{'='*70}\n")
+    
+    def __len__(self):
+        """Returns number of time windows (NOT number of series × windows)."""
+        return len(self.X)
+    
+    def __getitem__(self, idx):
+        """
+        Get all series at time window idx.
+        
+        Returns:
+            X: (n_series, seq_length, n_features) - all series, one time window
+            y: (n_series,) - all series targets
+        """
+        return torch.FloatTensor(self.X[idx]), torch.FloatTensor(self.y[idx])
+
+
 class TimeSeriesDatasetFlattened(Dataset):
     """
     Dataset for FLATTENED MULTIVARIATE time series forecasting.
@@ -1134,6 +1427,254 @@ def generate_out_of_sample_predictions_vectorized(
             # Update history (only values, no features)
             data['recent_values'] = np.append(data['recent_values'], actual_value)
             data['recent_dates'] = np.append(data['recent_dates'], pred_date)
+    
+    # -------------------------------------------------------------------------
+    # STEP 6: Collect results
+    # -------------------------------------------------------------------------
+    
+    predictions_dict = {}
+    actuals_dict = {}
+    
+    for ts_key in valid_ts_keys:
+        data = ts_data[ts_key]
+        if len(data['predictions']) > 0:
+            predictions_dict[ts_key] = data['predictions']
+            actuals_dict[ts_key] = data['test_actuals'][:len(data['predictions'])]
+    
+    all_preds = np.concatenate([np.array(v) for v in predictions_dict.values()])
+    all_acts = np.concatenate([np.array(v) for v in actuals_dict.values()])
+    
+    print(f"Generated predictions for {len(predictions_dict)} time series")
+    print(f"Total predictions: {len(all_preds):,}")
+    print(f"Optimization: {len(valid_ts_keys) * max_horizon} individual predictions → {max_horizon} batched forward passes")
+    
+    return predictions_dict, actuals_dict, all_preds, all_acts
+
+
+def generate_out_of_sample_predictions_vectorized_exog(
+    model, 
+    df_test_period,
+    df_full, 
+    fold_config,
+    exog_cols,
+    scaler_X, 
+    scaler_y, 
+    ts_key_to_idx, 
+    n_ts_keys, 
+    seq_length, 
+    embargo, 
+    device
+):
+    """
+    Generate out-of-sample predictions using BATCHED autoregressive forecasting.
+    
+    VECTORIZED VERSION WITH EXOGENOUS FEATURES - For multivariate forecasting with TimeSeriesDatasetVectorizedExog.
+    Uses Value column + static exogenous features (no temporal encoding, no one-hot).
+    
+    This function optimizes the prediction process by:
+    1. Batches all time series together for each prediction step
+    2. Runs ONE forward pass for all time series simultaneously
+    3. Updates all histories together
+    4. Handles exogenous features that are static across all series at each timestep
+    
+    Args:
+        model: Trained PyTorch model
+        df_test_period: Test period dataframe with ['Date', 'ts_key', 'Value', ...exog_cols]
+        df_full: Complete dataframe with all data
+        fold_config: Dict with 'test_start' and 'test_end' dates
+        exog_cols: List of exogenous feature column names
+        scaler_X: Fitted StandardScaler for Value + exogenous features
+        scaler_y: Fitted StandardScaler for target
+        ts_key_to_idx: Dict mapping ts_key to index
+        n_ts_keys: Total number of time series
+        seq_length: Lookback window size
+        embargo: Gap between last observation and prediction
+        device: torch.device (cpu/cuda/mps)
+    
+    Returns:
+        predictions_dict: Dict mapping ts_key -> list of predictions
+        actuals_dict: Dict mapping ts_key -> list of actual values
+        all_preds: Flattened array of all predictions
+        all_acts: Flattened array of all actuals
+    """
+    print("\n" + "-"*60)
+    print("STEP 3: Out-of-sample predictions (VECTORIZED WITH EXOG)")
+    print("-"*60)
+    
+    print(f"Test period: {fold_config['test_start']} to {fold_config['test_end']}")
+    print(f"Test observations: {len(df_test_period):,}")
+    print(f"Exogenous features: {len(exog_cols)} - {exog_cols}")
+    
+    # Setup
+    test_start_date = pd.to_datetime(fold_config['test_start'])
+    lookback_start = test_start_date - pd.DateOffset(months=seq_length + embargo)
+    
+    df_for_prediction = df_full[
+        (df_full['Date'] >= lookback_start) & 
+        (df_full['Date'] <= fold_config['test_end'])
+    ].copy()
+    
+    model.eval()
+    
+    n_exog = len(exog_cols)
+    n_features = 1 + n_exog  # Value + exogenous features
+    
+    # -------------------------------------------------------------------------
+    # STEP 1: Initialize data structures for ALL time series at once
+    # -------------------------------------------------------------------------
+    
+    ts_data = {}  # Master dictionary storing everything about each time series
+    valid_ts_keys = []  # Time series with enough history
+    
+    for ts_key, group in df_for_prediction.groupby('ts_key'):
+        group = group.sort_values('Date')
+        
+        # Skip if not in training set
+        if ts_key not in ts_key_to_idx:
+            continue
+        
+        # Get historical data
+        hist_data = group[group['Date'] < test_start_date]
+        
+        if len(hist_data) < seq_length + embargo:
+            continue
+        
+        # Get test data
+        test_data = group[group['Date'] >= test_start_date]
+        
+        if len(test_data) == 0:
+            continue
+        
+        # Initialize time series data (Value + exogenous features)
+        ts_data[ts_key] = {
+            'ts_key_idx': ts_key_to_idx[ts_key],
+            'recent_values': hist_data['Value'].values[-(seq_length + embargo):].copy(),
+            'recent_exog': hist_data[exog_cols].values[-(seq_length + embargo):].copy() if n_exog > 0 else None,
+            'recent_dates': pd.to_datetime(hist_data['Date'].values[-(seq_length + embargo):]),
+            'test_dates': test_data['Date'].values,
+            'test_actuals': test_data['Value'].values,
+            'predictions': [],
+            'n_predictions': len(test_data)
+        }
+        valid_ts_keys.append(ts_key)
+    
+    if len(valid_ts_keys) == 0:
+        print("No valid time series found!")
+        return {}, {}, np.array([]), np.array([])
+    
+    print(f"Processing {len(valid_ts_keys)} time series in batched mode...")
+    
+    # -------------------------------------------------------------------------
+    # STEP 2: Determine maximum prediction horizon across all time series
+    # -------------------------------------------------------------------------
+    
+    max_horizon = max(ts_data[ts_key]['n_predictions'] for ts_key in valid_ts_keys)
+    
+    # -------------------------------------------------------------------------
+    # STEP 3: Autoregressive prediction - ONE BATCH PER TIME STEP
+    # -------------------------------------------------------------------------
+    
+    for step in range(max_horizon):
+        # Collect all time series that need prediction at this step
+        batch_ts_keys = []
+        batch_sequences = []
+        
+        for ts_key in valid_ts_keys:
+            data = ts_data[ts_key]
+            
+            # Skip if this time series has already made all its predictions
+            if step >= data['n_predictions']:
+                continue
+            
+            # Build sequence for this time series (value + exogenous features)
+            sequence = []
+            
+            for i in range(seq_length):
+                idx = len(data['recent_values']) - seq_length - embargo + i
+                
+                if idx < 0 or idx >= len(data['recent_values']):
+                    break
+                
+                value = data['recent_values'][idx]
+                
+                # Build feature vector: [value, exog_1, exog_2, ..., exog_N]
+                if n_exog > 0:
+                    exog_features = data['recent_exog'][idx]
+                    feature_vector = np.concatenate([[value], exog_features])
+                else:
+                    feature_vector = np.array([value])
+                
+                sequence.append(feature_vector)
+            
+            # Only add if we have a complete sequence
+            if len(sequence) == seq_length:
+                batch_ts_keys.append(ts_key)
+                batch_sequences.append(sequence)
+        
+        # If no time series to predict at this step, continue
+        if len(batch_sequences) == 0:
+            continue
+        
+        # -------------------------------------------------------------------------
+        # STEP 4: Batch prediction for all time series at this step
+        # -------------------------------------------------------------------------
+        
+        # Stack all sequences into a batch
+        batch_array = np.array(batch_sequences, dtype=np.float32)  # (batch_size, seq_length, n_features)
+        
+        # Scale features
+        batch_size, seq_len, n_feats = batch_array.shape
+        batch_flat = batch_array.reshape(-1, n_feats)
+        batch_scaled = scaler_X.transform(batch_flat)
+        batch_scaled = batch_scaled.reshape(batch_size, seq_len, n_feats)
+        
+        # Single forward pass for entire batch
+        with torch.no_grad():
+            X_batch = torch.FloatTensor(batch_scaled).to(device)
+            pred_scaled_batch = model(X_batch).cpu().numpy()  # (batch_size, 1)
+            pred_values_batch = scaler_y.inverse_transform(pred_scaled_batch).flatten()
+        
+        # All negative predictions are set to zero
+        pred_values_batch = np.maximum(pred_values_batch, 0.0)
+
+        # -------------------------------------------------------------------------
+        # STEP 5: Update histories for all time series in batch
+        # -------------------------------------------------------------------------
+        
+        for i, ts_key in enumerate(batch_ts_keys):
+            data = ts_data[ts_key]
+            pred_value = pred_values_batch[i]
+            
+            # Store prediction
+            data['predictions'].append(pred_value)
+            
+            # Get actual value for this prediction
+            pred_date = pd.to_datetime(data['test_dates'][step])
+            
+            # Use actual value from test set
+            actual_value = data['test_actuals'][step]
+            
+            # Get actual exogenous features from test set
+            if n_exog > 0:
+                test_group = df_for_prediction[
+                    (df_for_prediction['ts_key'] == ts_key) & 
+                    (df_for_prediction['Date'] == pred_date)
+                ]
+                
+                if len(test_group) > 0:
+                    actual_exog = test_group[exog_cols].values[0]
+                else:
+                    # Carry forward last known exogenous values
+                    actual_exog = data['recent_exog'][-1]
+                
+                # Update history
+                data['recent_values'] = np.append(data['recent_values'], actual_value)
+                data['recent_exog'] = np.vstack([data['recent_exog'], actual_exog])
+                data['recent_dates'] = np.append(data['recent_dates'], pred_date)
+            else:
+                # No exogenous features - only update values
+                data['recent_values'] = np.append(data['recent_values'], actual_value)
+                data['recent_dates'] = np.append(data['recent_dates'], pred_date)
     
     # -------------------------------------------------------------------------
     # STEP 6: Collect results

@@ -95,6 +95,8 @@ Batching: Sequential time windows
 - **Full feature support including exogenous variables** (key difference from original)
 - Requires reshaping before model input
 
+**Reference:** This approach is inspired by [Nixtla's neuralforecast TimeSeriesDataset](https://github.com/Nixtla/neuralforecast/blob/main/neuralforecast/tsdataset.py) implementation, adapted to support exogenous features.
+
 ---
 
 ## 3. Dataset Size Comparison
@@ -732,4 +734,16 @@ The choice depends on your current phase:
 - 🏗️ **Development phase**: TimeSeriesDatasetFlattened (balanced)
 - 🚀 **Production/Optimization phase**: TimeSeriesDatasetVectorizedExog (maximum speed)
 
-All three approaches are valid; choose based on your specific constraints and priorities.
+
+---
+
+### 📚 Recommended Reading
+
+- [Nixtla's neuralforecast documentation](https://nixtla.github.io/neuralforecast/)
+- [PyTorch Performance Tuning Guide](https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html)
+- [Time Series Forecasting Best Practices](https://github.com/microsoft/forecasting)
+- [Hierarchical Forecasting Paper](https://otexts.com/fpp3/hierarchical.html)
+
+---
+
+*This document will continue to evolve as we discover new optimization techniques and best practices for our vehicle registration forecasting system.*

@@ -76,7 +76,13 @@ if __name__ == "__main__":
     TOTAL_OPTIMIZATION_TIME = None
 
     GLOBAL_PATH = os.getcwd()
-    OUTPUT_PATH = os.path.join(GLOBAL_PATH, "models", MODEL.lower() + "_multi_vec_exog")
+
+    if not EXOG:
+        MODEL_FOLDER = MODEL.lower() + "_multi_vec"
+    else:
+        MODEL_FOLDER = MODEL.lower() + "_multi_vec_exog"
+        
+    OUTPUT_PATH = os.path.join(GLOBAL_PATH, "models", MODEL_FOLDER)
     os.makedirs(OUTPUT_PATH, exist_ok=True)
     df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold_padding.parquet")
 

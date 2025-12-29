@@ -13,7 +13,9 @@ parts:
   - file: 2_1_Data_Analysis
 - caption: Modeling
   chapters:
-  - file: 3_1_Modelling_Approach
+  - file: 3_0_Modelling_Approach
+  - file: 3_1_0_MLP_Model_uni
+  - file: 3_1_1_MLP_Model_multi
   - file: 3_2_RNN_Model_uni
   - file: 3_3_RNN_Model_multi
   - file: 3_4_LSTM_Model_uni

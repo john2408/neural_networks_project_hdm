@@ -29,8 +29,8 @@ if __name__ == "__main__":
     # ========================================================================
     
 
-    MODEL = 'NBEATSx'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NBEATSx'
-    EXOG = True  # Use exogenous features
+    MODEL = 'BASELINE'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NBEATSx'
+    EXOG = False  # Use exogenous features
     ENTITY_NAME = "tensor-torres"  
     PROJECT_NAME = "neuralnetworks-timeseries" 
 
@@ -497,86 +497,86 @@ if __name__ == "__main__":
         print(f"{fold_config['name'].upper()}: {fold_config['test_start']} to {fold_config['test_end']}")
         print("="*80)
         
-        # Initialize W&B for this fold (skip for optimization and certain models)
+        # Initialize W&B for this fold
         wandb_run = None
-        if MODEL not in ['BASELINE']:
-            # Prepare config based on model type
-            wandb_config = {
-                "model": MODEL,
-                "fold": fold_config['name'],
-                "seq_length": SEQ_LENGTH,
-                "embargo": EMBARGO,
-                "train_ratio": TRAIN_RATIO,
-                "epochs": EPOCHS,
-                "batch_size": BATCH_SIZE,
-                "learning_rate": LEARNING_RATE,
-                "weight_decay": WEIGHT_DECAY,
-                "exogenous_features": EXOG,
-                "n_exog_features": len(exog_columns) if EXOG else 0,
-                "train_end": fold_config['train_end'],
-                "test_start": fold_config['test_start'],
-                "test_end": fold_config['test_end']
-            }
-            
-            # Add model-specific hyperparameters
-            if MODEL == 'MLP':
-                wandb_config.update({
-                    "num_layers": MLP_LAYERS,
-                    "hidden_size": MLP_HIDDEN_SIZE,
-                    "dropout": MLP_DROPOUT
-                })
-            elif MODEL == 'LSTM':
-                wandb_config.update({
-                    "num_layers": LSTM_LAYERS,
-                    "hidden_size": LSTM_HIDDEN_SIZE,
-                    "dropout": LSTM_DROPOUT
-                })
-            elif MODEL == 'RNN':
-                wandb_config.update({
-                    "num_layers": RNN_LAYERS,
-                    "hidden_size": RNN_HIDDEN_SIZE,
-                    "dropout": RNN_DROPOUT
-                })
-            elif MODEL == 'GRU':
-                wandb_config.update({
-                    "num_layers": GRU_LAYERS,
-                    "hidden_size": GRU_HIDDEN_SIZE,
-                    "dropout": GRU_DROPOUT
-                })
-            elif MODEL == 'CNN1D':
-                wandb_config.update({
-                    "num_layers": CNN_LAYERS,
-                    "hidden_size": CNN_HIDDEN_SIZE,
-                    "dropout": CNN_DROPOUT
-                })
-            elif MODEL in ['Transformer', 'TransformerCLS']:
-                wandb_config.update({
-                    "d_model": TRANSFORMER_D_MODEL,
-                    "nhead": TRANSFORMER_NHEAD,
-                    "num_layers": TRANSFORMER_LAYERS,
-                    "dim_feedforward": TRANSFORMER_DIM_FEEDFORWARD,
-                    "dropout": TRANSFORMER_DROPOUT
-                })
-            elif MODEL in ['NBEATS']:
-                wandb_config.update({
-                    "dropout_prob_theta": NBEATS_DROPOUT,
-                    "max_steps": NBEATS_MAX_STEPS,
-                    "n_harmonics": NBEATS_N_HARMONICS,
-                    "n_basis": NBEATS_N_BASIS,
-                    "n_blocks": NBEATS_N_BLOCKS,
-                    "mlp_units": NBEATS_MLP_UNITS
-                })
-            elif MODEL in ['NBEATSx']:
-                wandb_config.update({
-                    "dropout_prob_theta": NBEATSX_DROPOUT,
-                    "max_steps": NBEATSX_MAX_STEPS,
-                    "n_harmonics": NBEATSX_N_HARMONICS,
-                    "n_basis": NBEATSX_N_BASIS,
-                    "n_blocks": NBEATSX_N_BLOCKS,
-                    "mlp_units": NBEATSX_MLP_UNITS
-                })
-            
-            # Initialize W&B run
+        # Prepare config based on model type
+        wandb_config = {
+            "model": MODEL,
+            "fold": fold_config['name'],
+            "seq_length": SEQ_LENGTH,
+            "embargo": EMBARGO,
+            "train_ratio": TRAIN_RATIO,
+            "epochs": EPOCHS,
+            "batch_size": BATCH_SIZE,
+            "learning_rate": LEARNING_RATE,
+            "weight_decay": WEIGHT_DECAY,
+            "exogenous_features": EXOG,
+            "n_exog_features": len(exog_columns) if EXOG else 0,
+            "train_end": fold_config['train_end'],
+            "test_start": fold_config['test_start'],
+            "test_end": fold_config['test_end']
+        }
+        
+        # Add model-specific hyperparameters
+        if MODEL == 'MLP':
+            wandb_config.update({
+                "num_layers": MLP_LAYERS,
+                "hidden_size": MLP_HIDDEN_SIZE,
+                "dropout": MLP_DROPOUT
+            })
+        elif MODEL == 'LSTM':
+            wandb_config.update({
+                "num_layers": LSTM_LAYERS,
+                "hidden_size": LSTM_HIDDEN_SIZE,
+                "dropout": LSTM_DROPOUT
+            })
+        elif MODEL == 'RNN':
+            wandb_config.update({
+                "num_layers": RNN_LAYERS,
+                "hidden_size": RNN_HIDDEN_SIZE,
+                "dropout": RNN_DROPOUT
+            })
+        elif MODEL == 'GRU':
+            wandb_config.update({
+                "num_layers": GRU_LAYERS,
+                "hidden_size": GRU_HIDDEN_SIZE,
+                "dropout": GRU_DROPOUT
+            })
+        elif MODEL == 'CNN1D':
+            wandb_config.update({
+                "num_layers": CNN_LAYERS,
+                "hidden_size": CNN_HIDDEN_SIZE,
+                "dropout": CNN_DROPOUT
+            })
+        elif MODEL in ['Transformer', 'TransformerCLS']:
+            wandb_config.update({
+                "d_model": TRANSFORMER_D_MODEL,
+                "nhead": TRANSFORMER_NHEAD,
+                "num_layers": TRANSFORMER_LAYERS,
+                "dim_feedforward": TRANSFORMER_DIM_FEEDFORWARD,
+                "dropout": TRANSFORMER_DROPOUT
+            })
+        elif MODEL in ['NBEATS']:
+            wandb_config.update({
+                "dropout_prob_theta": NBEATS_DROPOUT,
+                "max_steps": NBEATS_MAX_STEPS,
+                "n_harmonics": NBEATS_N_HARMONICS,
+                "n_basis": NBEATS_N_BASIS,
+                "n_blocks": NBEATS_N_BLOCKS,
+                "mlp_units": NBEATS_MLP_UNITS
+            })
+        elif MODEL in ['NBEATSx']:
+            wandb_config.update({
+                "dropout_prob_theta": NBEATSX_DROPOUT,
+                "max_steps": NBEATSX_MAX_STEPS,
+                "n_harmonics": NBEATSX_N_HARMONICS,
+                "n_basis": NBEATSX_N_BASIS,
+                "n_blocks": NBEATSX_N_BLOCKS,
+                "mlp_units": NBEATSX_MLP_UNITS
+            })
+        
+        # Initialize W&B run (for all models including BASELINE)
+        if MODEL != 'BASELINE':
             wandb_run = wandb.init(
                 entity=ENTITY_NAME,
                 project=PROJECT_NAME,
@@ -649,6 +649,16 @@ if __name__ == "__main__":
             all_acts = np.array(all_acts)
             
             print(f"✓ Generated {len(all_preds)} baseline predictions")
+            
+            # Initialize W&B for BASELINE model
+            wandb_run = wandb.init(
+                entity=ENTITY_NAME,
+                project=PROJECT_NAME,
+                name=f"{MODEL}__{MODE}__{fold_config['name'].replace(' ', '_')}",
+                config=wandb_config,
+                reinit=True
+            )
+            print(f"\n✓ Initialized W&B run: {wandb_run.name}")
         
         # -----------------------------------------------------------------
         # NBEATS MODEL: Neural Basis Expansion Analysis

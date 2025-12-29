@@ -121,7 +121,7 @@ def train_naive():
     
     model = MLP(INPUT_SIZE).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    criterion = nn.MSELoss()
+    criterion = nn.L1Loss()
     
     print(f"\nTraining for {EPOCHS} epochs...")
     start = time.perf_counter()
@@ -216,7 +216,7 @@ def train_vectorized():
     
     model = MLP(INPUT_SIZE).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    criterion = nn.MSELoss()
+    criterion = nn.L1Loss()
     
     print(f"\nTraining for {EPOCHS} epochs...")
     start = time.perf_counter()

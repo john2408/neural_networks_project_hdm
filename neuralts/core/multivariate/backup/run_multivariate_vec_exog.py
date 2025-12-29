@@ -778,7 +778,7 @@ if __name__ == "__main__":
             
             print(f"Batch size: {VECTORIZED_BATCH_SIZE} time windows (processes {VECTORIZED_BATCH_SIZE * n_series:,} predictions per batch)")
             
-            criterion = nn.MSELoss()
+            criterion = nn.L1Loss()
             optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
             

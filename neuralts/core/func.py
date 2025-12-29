@@ -1830,15 +1830,15 @@ def create_model_from_trial(model_type, trial, n_series, n_features_additional, 
     return model, hyperparams
 
 
-def create_univariate_model_from_trial(model_type, trial, input_size, seq_length):
+def create_model_from_trial(model_type, trial, input_size, seq_length):
     """
-    Create a univariate model instance based on trial hyperparameters.
+    Create a model instance based on trial hyperparameters.
     
     Args:
-        model_type: Model architecture name (LSTM, RNN, GRU, CNN1D, MLP, Transformer, TransformerCLS)
+        model_type: Model architecture name (LSTM, RNN, GRU, CNN1D, MLP, Transformer, TransformerCLS, NBEATS, NBEATSx)
         trial: Optuna trial object
-        input_size: Number of input features (including one-hot encoding)
-        seq_length: Sequence length
+        input_size: Number of input features (including one-hot encoding) or seq_length for NBEATS/NBEATSx
+        seq_length: Sequence length (used as input_size for NBEATS/NBEATSx)
     
     Returns:
         model: Instantiated model
@@ -1970,6 +1970,59 @@ def create_univariate_model_from_trial(model_type, trial, input_size, seq_length
             'dropout': dropout
         }
     
+    elif model_type == 'NBEATS':
+        from neuralforecast.models import NBEATS
+        
+        # Suggest hyperparameters
+        dropout = trial.suggest_float('dropout_prob_theta', 0.0, 0.7)
+        max_steps = trial.suggest_categorical('max_steps', [200, 300, 500, 700])
+        n_harmonics = trial.suggest_int('n_harmonics', 1, 4)
+        n_basis = trial.suggest_int('n_polynomials', 1, 4)
+        n_blocks = trial.suggest_categorical('n_blocks', [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+        
+        # MLP units: suggest size per stack
+        mlp_size = trial.suggest_categorical('mlp_size', [256, 512, 1024])
+        mlp_units = [[mlp_size, mlp_size]] * len(n_blocks)
+        
+        # Note: NBEATS models are instantiated differently (not in this function directly)
+        # Return None for model since NeuralForecast models need additional context (horizon, etc.)
+        model = None
+        hyperparams = {
+            'dropout_prob_theta': dropout,
+            'max_steps': max_steps,
+            'n_harmonics': n_harmonics,
+            'n_polynomials': n_basis,
+            'n_blocks': n_blocks,
+            'mlp_units': mlp_units,
+        }
+    
+    elif model_type == 'NBEATSx':
+        from neuralforecast.models import NBEATSx
+        
+        # Suggest hyperparameters
+        dropout = trial.suggest_float('dropout_prob_theta', 0.0, 0.7)
+        max_steps = trial.suggest_categorical('max_steps', [200, 300, 500, 700])
+        n_harmonics = trial.suggest_int('n_harmonics', 1, 4)
+        n_basis = trial.suggest_int('n_polynomials', 1, 4)
+        basis = trial.suggest_categorical('basis', ['polynomial'])
+        n_blocks = trial.suggest_categorical('n_blocks', [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+        
+        # MLP units: suggest size per stack
+        mlp_size = trial.suggest_categorical('mlp_size', [256, 512, 1024])
+        mlp_units = [[mlp_size, mlp_size]] * len(n_blocks)
+        
+        # Note: NBEATSx models are instantiated differently (not in this function directly)
+        # Return None for model since NeuralForecast models need additional context (horizon, stat_exog_list, etc.)
+        model = None
+        hyperparams = {
+            'dropout_prob_theta': dropout,
+            'max_steps': max_steps,
+            'n_harmonics': n_harmonics,
+            'n_polynomials': n_basis,
+            'n_blocks': n_blocks,
+            'mlp_units': mlp_units,
+        }
+    
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
@@ -1999,7 +2052,7 @@ def train_with_early_stopping(model, train_loader, val_loader, device,
     import torch.nn as nn
     import torch.optim as optim
     
-    criterion = nn.MSELoss()
+    criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
@@ -2033,7 +2086,8 @@ def train_with_early_stopping(model, train_loader, val_loader, device,
 
 def train_with_early_stopping_vectorized(model, train_loader, val_loader, device, seq_length,
                                           learning_rate=0.001, weight_decay=1e-5,
-                                          max_epochs=30, patience=5):
+                                          max_epochs=30, patience=5, 
+                                          criterion=None):
     """
     Train model with early stopping using VECTORIZED batching.
     
@@ -2059,7 +2113,8 @@ def train_with_early_stopping_vectorized(model, train_loader, val_loader, device
     import torch.nn as nn
     import torch.optim as optim
     
-    criterion = nn.MSELoss()
+    if criterion is None:
+        criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     

@@ -14,14 +14,19 @@ parts:
 - caption: Modeling
   chapters:
   - file: 3_1_Modelling_Approach
-  - file: 3_2_RNN_Model
-  - file: 3_3_LSTM_Model
-  - file: 3_4_GRU_Model
-  - file: 3_5_Transformers
-  - file: 3_6_CNN_1D
-  - file: 3_7_NBEATS_Model
-  - file: 3_8_NBEATSx_Model
-  - file: 3_9_Comparison_of_Models
+  - file: 3_2_RNN_Model_uni
+  - file: 3_3_RNN_Model_multi
+  - file: 3_4_LSTM_Model_uni
+  - file: 3_5_LSTM_Model_multi
+  - file: 3_6_GRU_Model_uni
+  - file: 3_7_GRU_Model_multi
+  - file: 3_8_Transformers_uni
+  - file: 3_9_Transformers_multi
+  - file: 3_10_CNN_1D_uni
+  - file: 3_11_CNN_1D_multi
+  - file: 3_12_NBEATS_Model_uni
+  - file: 3_13_NBEATSx_Model_multi
+  - file: 3_14_Comparison_of_Models
 - caption: Results and Conclusion
   chapters:
   - file: 4_1_Results_and_Conclusion

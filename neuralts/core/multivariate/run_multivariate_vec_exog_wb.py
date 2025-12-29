@@ -28,11 +28,11 @@ if __name__ == "__main__":
     # TRAINING PARAMETERS
     # ========================================================================
     
+    MODEL = 'NBEATSx'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NBEATSx'
+    EXOG = True  # Use exogenous features
 
-    MODEL = 'BASELINE'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NBEATSx'
-    EXOG = False  # Use exogenous features
     ENTITY_NAME = "tensor-torres"  
-    PROJECT_NAME = "neuralnetworks-timeseries" 
+    PROJECT_NAME = "neuralnetworks-timeseries-multivariate" 
 
     PYTORCH_SEED = 42
     LOSS = MAE() # criterion = nn.L1Loss()
@@ -297,11 +297,10 @@ if __name__ == "__main__":
                         input_size=SEQ_LENGTH,
                         loss=LOSS,
                         h=val_size,
-                        dropout_prob_theta=hyperparams['dropout_prob_theta'],
+                        #dropout_prob_theta=hyperparams['dropout_prob_theta'],
                         max_steps=hyperparams['max_steps'],
                         n_harmonics=hyperparams['n_harmonics'],
                         n_polynomials=hyperparams['n_polynomials'],
-                        stack_types=hyperparams['stack_types'],
                         n_blocks=hyperparams['n_blocks'],
                         mlp_units=hyperparams['mlp_units'],
                         scaler_type='robust',
@@ -702,7 +701,7 @@ if __name__ == "__main__":
                     n_basis=NBEATS_N_BASIS,
                     n_blocks=NBEATS_N_BLOCKS,
                     mlp_units=NBEATS_MLP_UNITS,
-                    dropout_prob_theta=NBEATS_DROPOUT,
+                    #dropout_prob_theta=NBEATS_DROPOUT,
                     callbacks=[wb_callback] 
                 )                
             ]

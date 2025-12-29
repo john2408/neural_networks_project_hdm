@@ -26,14 +26,16 @@ if __name__ == "__main__":
     # ========================================================================
     # TRAINING PARAMETERS
     # ========================================================================
-    
+
+    MODEL = 'RNNMultivariate'  # Options: 'BASELINE', 'MLPMultivariate', 'LSTMMultivariate', 'RNNMultivariate', 'GRUMultivariate', 'CNN1DMultivariate', 'TransformerMultivariate'
+ 
     PYTORCH_SEED = 42
 
     SEQ_LENGTH = 6
     TRAIN_RATIO = 0.8
     EMBARGO = 1
     EPOCHS = 25
-    BATCH_SIZE = 32  # Smaller batch for flattened approach
+    BATCH_SIZE = 8  # Smaller batch for flattened approach
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
 
@@ -69,8 +71,6 @@ if __name__ == "__main__":
     N_TRIALS = 3  # Number of Optuna trials
     OPTUNA_TIMEOUT = 3600  # Timeout in seconds (1 hour)
 
-    MODEL = 'RNNMultivariate'  # Options: 'BASELINE', 'MLPMultivariate', 'LSTMMultivariate', 'RNNMultivariate', 'GRUMultivariate', 'CNN1DMultivariate', 'TransformerMultivariate'
-
     TOTAL_SCRIPT_RUNTIME = None
     TOTAL_TRAINING_TIME_FOLDS = dict()
     TOTAL_OPTIMIZATION_TIME = None
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     GLOBAL_PATH = os.getcwd()
     OUTPUT_PATH = os.path.join(GLOBAL_PATH, "models", MODEL.lower() + "_exog")
     os.makedirs(OUTPUT_PATH, exist_ok=True)
-    df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold.parquet")
+    df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold_padding.parquet")
 
 
     # ========================================================================
@@ -100,11 +100,10 @@ if __name__ == "__main__":
     print(f"Device: {device}")
 
 
-
     df_full = pd.read_parquet(df_path, engine='pyarrow')
-    df_full['Year'] = df_full['Date'].dt.year
-    df_full['Month'] = df_full['Date'].dt.month
 
+    cols_to_drop = ["OEM", "Model", "drive_type"]
+    df_full = df_full.drop(columns=cols_to_drop)
 
     date_col = 'Date'
     ts_key_col = 'ts_key'
@@ -223,7 +222,7 @@ if __name__ == "__main__":
             """
             # Suggest hyperparameters
             learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
-            batch_size = trial.suggest_categorical('batch_size', [16, 32, 64])
+            batch_size = trial.suggest_categorical('batch_size', [4, 8, 16])
             
             # Create model with trial hyperparameters
             model, hyperparams = create_model_from_trial(
@@ -556,7 +555,7 @@ if __name__ == "__main__":
             train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
             val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
             
-            criterion = nn.MSELoss()
+            criterion = nn.L1Loss()
             optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
             

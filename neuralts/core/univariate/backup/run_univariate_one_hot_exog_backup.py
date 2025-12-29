@@ -11,10 +11,9 @@ from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster,
                             CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
-
+import os
 
 warnings.filterwarnings('ignore')
-
 
 if __name__ == "__main__":
 
@@ -23,8 +22,10 @@ if __name__ == "__main__":
     # TRAINING PARAMETERS
     # ========================================================================
 
-    MODE = "UNI"  # Options: "UNI": Univariate, "MULTI": Multivariate
-    
+    MODE = "UNI"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
+    MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
+
+    PYTORCH_SEED = 42
     SEQ_LENGTH = 6
     TRAIN_RATIO = 0.8
     EMBARGO = 1
@@ -64,10 +65,26 @@ if __name__ == "__main__":
     N_TRIALS = 3  # Number of Optuna trials
     OPTUNA_TIMEOUT = 900  # Timeout in seconds (15 minutes)
 
-    MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
+
+    TOTAL_SCRIPT_RUNTIME = None
+    TOTAL_TRAINING_TIME_FOLDS = dict()
+    TOTAL_OPTIMIZATION_TIME = None
+
+    GLOBAL_PATH = os.getcwd()
+    OUTPUT_PATH = os.path.join(GLOBAL_PATH, "models", MODEL.lower() + "_" + MODE.lower() + "_one_hot")
+    os.makedirs(OUTPUT_PATH, exist_ok=True)
+    df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold.parquet")
 
     # ========================================================================
 
+    torch.manual_seed(PYTORCH_SEED)
+    np.random.seed(PYTORCH_SEED)
+    torch.cuda.manual_seed_all(PYTORCH_SEED)
+    torch.backends.cudnn.deterministic = True # Ensures reproducibility
+    torch.backends.cudnn.benchmark = False # Ensures reproducibility
+
+
+    SCRIPT_START_TIME = time.time()
 
     # Check MPS availability
     if torch.backends.mps.is_available():
@@ -85,24 +102,17 @@ if __name__ == "__main__":
 
 
     # Load data
-    import os
-    cwd = os.getcwd()
-    full_path = os.path.join(cwd, "data", "gold", "monthly_registration_volume_gold.parquet")
-    output_path = os.path.join(cwd, "models", MODEL.lower() + "_" + MODE.lower() + "_one_hot")
-    os.makedirs(output_path, exist_ok=True)
-
-    df_full = pd.read_parquet(full_path, engine='pyarrow')
-    df_full['Year'] = df_full['Date'].dt.year
-    df_full['Month'] = df_full['Date'].dt.month
+    df_full = pd.read_parquet(df_path, engine='pyarrow')
 
     date_col = 'Date'
     ts_key_col = 'ts_key'
     value_col = 'Value'
-    #features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
     
     if MODE == "UNI":
-        features = ['Year', 'Month']
-    elif MODE == "MULTI":
+        features = ['sin_month', 'cos_month', 'scaled_year']
+        drop_cols = ['Year', 'Month']
+        df_full = df_full.drop(columns=drop_cols)
+    elif MODE == "EXO":
         features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
 
     #Validate not NaN or infinite values in features
@@ -166,7 +176,8 @@ if __name__ == "__main__":
     # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
     # ========================================================================
     
-    if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+    best_trial = None
+    if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE']:
         import optuna
         from neuralts.core.func import create_univariate_model_from_trial, train_with_early_stopping
         
@@ -249,7 +260,10 @@ if __name__ == "__main__":
         )
         
         print("\nStarting optimization...")
+        OPTIMIZATION_START_TIME = time.time()
         study.optimize(objective, n_trials=N_TRIALS, timeout=OPTUNA_TIMEOUT, show_progress_bar=True)
+        TOTAL_OPTIMIZATION_TIME = (time.time() - OPTIMIZATION_START_TIME) / 60.0  # in minutes
+        print(f"\nOptimization completed in {TOTAL_OPTIMIZATION_TIME:.1f} minutes")
         
         print("\n" + "="*80)
         print("OPTIMIZATION RESULTS")
@@ -303,13 +317,13 @@ if __name__ == "__main__":
         print(f"  Batch size: {BATCH_SIZE}")
         
         # Save optimization results
-        optuna_results_path = os.path.join(output_path, 'optuna_results.csv')
+        optuna_results_path = os.path.join(OUTPUT_PATH, 'optuna_results.csv')
         trials_df = study.trials_dataframe()
         trials_df.to_csv(optuna_results_path, index=False)
         print(f"\n✓ Saved Optuna results to: {optuna_results_path}")
         
         # Save best hyperparameters
-        best_params_path = os.path.join(output_path, 'best_hyperparameters.txt')
+        best_params_path = os.path.join(OUTPUT_PATH, 'best_hyperparameters.txt')
         with open(best_params_path, 'w') as f:
             f.write(f"Best Hyperparameters for {MODEL}\n")
             f.write("="*60 + "\n\n")
@@ -319,8 +333,6 @@ if __name__ == "__main__":
                 f.write(f"  {key}: {value}\n")
         print(f"✓ Saved best hyperparameters to: {best_params_path}")
     
-    elif MODEL in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
-        print(f"\n⚠ Skipping hyperparameter optimization for {MODEL} model")
     else:
         print("\n⚠ Hyperparameter optimization disabled (OPTIMIZE_HYPERPARAMETERS=False)")
     
@@ -336,7 +348,7 @@ if __name__ == "__main__":
     for fold_idx, fold_config in enumerate(folds):
         
         # Fold Variables
-        fold_output_dir = os.path.join(output_path, f"fold_{fold_idx + 1}")
+        fold_output_dir = os.path.join(OUTPUT_PATH, f"fold_{fold_idx + 1}")
         os.makedirs(fold_output_dir, exist_ok=True)
 
         print("\n" + "="*80)
@@ -406,238 +418,7 @@ if __name__ == "__main__":
             all_acts = np.array(all_acts)
             
             print(f"✓ Generated {len(all_preds)} baseline predictions")
-        
-        # -----------------------------------------------------------------
-        # NBEATS MODEL: Neural Basis Expansion Analysis
-        # -----------------------------------------------------------------
-        elif MODEL == 'NBEATS':
-            print("\n" + "-"*60)
-            print("NBEATS MODEL: Neural Basis Expansion Analysis")
-            print("-"*60)
-            
-            from neuralforecast import NeuralForecast
-            from neuralforecast.models import NBEATS
-            
-            # Prepare data in neuralforecast format
-            df_train_nf = df_train.copy()
-            df_train_nf = df_train_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Get test period data
-            df_test_period = df_full[
-                (df_full['Date'] >= fold_config['test_start']) & 
-                (df_full['Date'] <= fold_config['test_end'])
-            ].copy()
-            
-            # Calculate horizon (number of months to forecast)
-            horizon = len(df_test_period['Date'].unique())
-            
-            print(f"Training NBEATS with input_size={SEQ_LENGTH}, horizon={horizon}")
-            
-            # Initialize model
-            models = [
-                NBEATS(
-                    input_size=SEQ_LENGTH,
-                    h=horizon,
-                    max_steps=500,
-                    scaler_type='robust',
-                    random_seed=42, 
-                )                
-            ]
-            
-            nf = NeuralForecast(models=models, freq='ME')  # ME = Month End
-            
-            # Train model
-            nf.fit(df=df_train_nf, val_size=horizon)
-            
-            # Generate predictions
-            Y_hat_df = nf.predict().reset_index()
-            
-            # Prepare test data in same format
-            df_test_nf = df_test_period.copy()
-            df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_test_nf = df_test_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Merge predictions with actuals
-            df_results = pd.merge(df_test_nf, Y_hat_df, on=['unique_id', 'ds'], how='left')
-            
-            # Extract predictions and actuals per time series
-            predictions_dict = {}
-            actuals_dict = {}
-            
-            for ts_key in df_results['unique_id'].unique():
-                ts_data = df_results[df_results['unique_id'] == ts_key].sort_values('ds')
-                preds = ts_data['NBEATS'].values
-                acts = ts_data['y'].values
-                
-                # Replace negative predictions with 0
-                preds = np.maximum(preds, 0)
-                
-                # Handle NaN predictions
-                preds = np.nan_to_num(preds, nan=0.0)
-                
-                predictions_dict[ts_key] = preds
-                actuals_dict[ts_key] = acts
-            
-            all_preds = np.concatenate([v for v in predictions_dict.values()])
-            all_acts = np.concatenate([v for v in actuals_dict.values()])
-            
-            print(f"✓ Generated {len(all_preds)} NBEATS predictions")
-        
-        # -----------------------------------------------------------------
-        # NHITS MODEL: Neural Hierarchical Interpolation for Time Series
-        # -----------------------------------------------------------------
-        elif MODEL == 'NHITS':
-            print("\n" + "-"*60)
-            print("NHITS MODEL: Neural Hierarchical Interpolation for Time Series")
-            print("-"*60)
-            
-            from neuralforecast import NeuralForecast
-            from neuralforecast.models import NHITS
-            
-            # Prepare data in neuralforecast format
-            df_train_nf = df_train.copy()
-            df_train_nf = df_train_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Get test period data
-            df_test_period = df_full[
-                (df_full['Date'] >= fold_config['test_start']) & 
-                (df_full['Date'] <= fold_config['test_end'])
-            ].copy()
-            
-            # Calculate horizon
-            horizon = len(df_test_period['Date'].unique())
-            
-            print(f"Training NHITS with input_size={SEQ_LENGTH}, horizon={horizon}")
-            
-            # Initialize model
-            models = [
-                NHITS(
-                    input_size=SEQ_LENGTH,
-                    h=horizon,
-                    max_steps=500,
-                    scaler_type='robust',
-                    random_seed=42
-                )
-            ]
-            
-            nf = NeuralForecast(models=models, freq='MS')
-            
-            # Train model
-            nf.fit(df=df_train_nf, val_size=horizon)
-            
-            # Generate predictions
-            Y_hat_df = nf.predict().reset_index()
-            
-            # Prepare test data
-            df_test_nf = df_test_period.copy()
-            df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_test_nf = df_test_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Merge predictions with actuals
-            df_results = pd.merge(df_test_nf, Y_hat_df, on=['unique_id', 'ds'], how='left')
-            
-            # Extract predictions and actuals
-            predictions_dict = {}
-            actuals_dict = {}
-            
-            for ts_key in df_results['unique_id'].unique():
-                ts_data = df_results[df_results['unique_id'] == ts_key].sort_values('ds')
-                preds = ts_data['NHITS'].values
-                acts = ts_data['y'].values
-                
-                # Replace negative predictions with 0
-                preds = np.maximum(preds, 0)
-                
-                # Handle NaN predictions
-                preds = np.nan_to_num(preds, nan=0.0)
-                
-                predictions_dict[ts_key] = preds
-                actuals_dict[ts_key] = acts
-            
-            all_preds = np.concatenate([v for v in predictions_dict.values()])
-            all_acts = np.concatenate([v for v in actuals_dict.values()])
-            
-            print(f"✓ Generated {len(all_preds)} NHITS predictions")
-        
-        # -----------------------------------------------------------------
-        # KAN MODEL: Kolmogorov-Arnold Networks
-        # -----------------------------------------------------------------
-        elif MODEL == 'KAN':
-            print("\n" + "-"*60)
-            print("KAN MODEL: Kolmogorov-Arnold Networks")
-            print("-"*60)
-            
-            from neuralforecast import NeuralForecast
-            from neuralforecast.models import KAN
-            
-            # Prepare data in neuralforecast format
-            df_train_nf = df_train.copy()
-            df_train_nf = df_train_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Get test period data
-            df_test_period = df_full[
-                (df_full['Date'] >= fold_config['test_start']) & 
-                (df_full['Date'] <= fold_config['test_end'])
-            ].copy()
-            
-            # Calculate horizon
-            horizon = len(df_test_period['Date'].unique())
-            
-            print(f"Training KAN with input_size={SEQ_LENGTH}, horizon={horizon}")
-            
-            # Initialize model
-            models = [
-                KAN(
-                    input_size=SEQ_LENGTH,
-                    h=horizon,
-                    max_steps=500,
-                    scaler_type='robust',
-                    random_seed=42
-                )
-            ]
-            
-            nf = NeuralForecast(models=models, freq='MS')
-            
-            # Train model
-            nf.fit(df=df_train_nf, val_size=horizon)
-            
-            # Generate predictions
-            Y_hat_df = nf.predict().reset_index()
-            
-            # Prepare test data
-            df_test_nf = df_test_period.copy()
-            df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_test_nf = df_test_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Merge predictions with actuals
-            df_results = pd.merge(df_test_nf, Y_hat_df, on=['unique_id', 'ds'], how='left')
-            
-            # Extract predictions and actuals
-            predictions_dict = {}
-            actuals_dict = {}
-            
-            for ts_key in df_results['unique_id'].unique():
-                ts_data = df_results[df_results['unique_id'] == ts_key].sort_values('ds')
-                preds = ts_data['KAN'].values
-                acts = ts_data['y'].values
-                
-                # Replace negative predictions with 0
-                preds = np.maximum(preds, 0)
-                
-                # Handle NaN predictions
-                preds = np.nan_to_num(preds, nan=0.0)
-                
-                predictions_dict[ts_key] = preds
-                actuals_dict[ts_key] = acts
-            
-            all_preds = np.concatenate([v for v in predictions_dict.values()])
-            all_acts = np.concatenate([v for v in actuals_dict.values()])
-            
-            print(f"✓ Generated {len(all_preds)} KAN predictions")
-            
+         
         else:
             # -----------------------------------------------------------------
             # STEP 1: Create datasets for model development (train/val split)
@@ -776,8 +557,12 @@ if __name__ == "__main__":
             
             # Load best model
             model.load_state_dict(best_model_state)
+
+            training_time = time.time() - start_time  # in seconds
+
+            TOTAL_TRAINING_TIME_FOLDS[fold_config['name']] = training_time
             
-            print(f"\nTraining completed in {time.time() - start_time:.1f}s")
+            print(f"\nTraining completed in {training_time:.1f} seconds")
             print(f"Best validation loss: {best_val_loss:.6f}")
             
 
@@ -896,8 +681,8 @@ if __name__ == "__main__":
         print(f"  R²:    {r2:.4f}")
         print(f"  SMAPE: {smape_score:.2f}%")
         
-        # Save model checkpoint (skip for baseline and neuralforecast models)
-        if MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+        # Save model checkpoint
+        if MODEL not in ['BASELINE']:
             torch.save({
                 'model_state_dict': best_model_state,
                 'input_size': INPUT_SIZE,
@@ -913,8 +698,8 @@ if __name__ == "__main__":
                 'metrics': fold_metrics[-1]
             }, os.path.join(fold_output_dir, 'model_checkpoint.pth'))
         
-        # Visualization (skip for baseline and neuralforecast models)
-        if MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+        # Visualization
+        if MODEL not in ['BASELINE']:
             fig, axes = plt.subplots(1, 2, figsize=(15, 6))
             
             # Training history
@@ -991,11 +776,11 @@ if __name__ == "__main__":
         print(f"  {cat:>10}: {avg_pct:5.1f}% ± {std_pct:4.1f}% ({avg_count:.0f} series avg)")
     
     # Save SMAPE distribution summary
-    smape_dist_df.to_csv(os.path.join(output_path, 'smape_distribution.csv'), index=False)
+    smape_dist_df.to_csv(os.path.join(OUTPUT_PATH, 'smape_distribution.csv'), index=False)
     
-    print(f"\n✓ Saved metrics to: {output_path}/fold_metrics.csv")
-    print(f"✓ Saved summary to: {output_path}/summary_metrics.csv")
-    print(f"✓ Saved SMAPE distribution to: {output_path}/smape_distribution.csv")
+    print(f"\n✓ Saved metrics to: {OUTPUT_PATH}/fold_metrics.csv")
+    print(f"✓ Saved summary to: {OUTPUT_PATH}/summary_metrics.csv")
+    print(f"✓ Saved SMAPE distribution to: {OUTPUT_PATH}/smape_distribution.csv")
     
     # ========================================================================
     # FINAL RESULTS: Average metrics across all folds
@@ -1023,7 +808,7 @@ if __name__ == "__main__":
     print(f"  SMAPE: {avg_metrics['smape']:.2f}% ± {std_metrics['smape']:.2f}%")
     
     # Save metrics to CSV
-    metrics_df.to_csv(os.path.join(output_path, 'fold_metrics.csv'), index=False)
+    metrics_df.to_csv(os.path.join(OUTPUT_PATH, 'fold_metrics.csv'), index=False)
     
     # Save summary
     summary_dict = {
@@ -1034,23 +819,47 @@ if __name__ == "__main__":
                 std_metrics['r2'], std_metrics['smape']]
     }
     summary_df = pd.DataFrame(summary_dict)
-    summary_df.to_csv(os.path.join(output_path, 'summary_metrics.csv'), index=False)
+    summary_df.to_csv(os.path.join(OUTPUT_PATH, 'summary_metrics.csv'), index=False)
+
+    TOTAL_SCRIPT_RUNTIME = (time.time() - SCRIPT_START_TIME) / 60.0  # in minutes
+    print(f"\nTotal script runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes")
     
     # ========================================================================
     # SAVE COMPREHENSIVE RESULTS TO TXT FILE
     # ========================================================================
     
-    results_txt_path = os.path.join(output_path, 'final_results_summary.txt')
+    results_txt_path = os.path.join(OUTPUT_PATH, 'final_results_summary.txt')
     
     with open(results_txt_path, 'w') as f:
         f.write("="*80 + "\n")
         f.write(f"{MODEL} MODEL - FINAL EVALUATION RESULTS\n")
         f.write("="*80 + "\n\n")
+
+        f.write(f"Model: {MODEL}\n")
+        if best_trial is not None:
+            f.write("Best Hyperparameters:\n")
+            for key, value in best_trial.params.items():
+                f.write(f"    {key}: {value}\n")
+        
+        # Total optimization time
+        if OPTIMIZE_HYPERPARAMETERS and best_trial is not None:
+            f.write(f"\nTotal Hyperparameter Optimization Time: {TOTAL_OPTIMIZATION_TIME:.1f} minutes\n")
+
+        # Training time per fold
+        f.write("\nTraining Time per Fold:\n")
+        for fold_name, training_time in TOTAL_TRAINING_TIME_FOLDS.items():
+            f.write(f"  {fold_name}: {training_time:.1f} seconds\n")
+        
+        f.write(f"\nTotal Script Runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes\n")
+
+
+        f.write("\n" + "="*80 + "\n\n")
         
         # 1. FINAL RESULTS: AVERAGE METRICS ACROSS ALL FOLDS
         f.write("="*80 + "\n")
         f.write("1. FINAL RESULTS: AVERAGE METRICS ACROSS ALL FOLDS\n")
         f.write("="*80 + "\n\n")
+        
         
         f.write("Per-Fold Metrics:\n")
         f.write(metrics_df.to_string(index=False) + "\n\n")
@@ -1093,9 +902,9 @@ if __name__ == "__main__":
         f.write("END OF REPORT\n")
         f.write("="*80 + "\n")
     
-    print(f"\n✓ Saved metrics to: {output_path}/fold_metrics.csv")
-    print(f"✓ Saved summary to: {output_path}/summary_metrics.csv")
-    print(f"✓ Saved final results summary to: {output_path}/final_results_summary.txt")
+    print(f"\n✓ Saved metrics to: {OUTPUT_PATH}/fold_metrics.csv")
+    print(f"✓ Saved summary to: {OUTPUT_PATH}/summary_metrics.csv")
+    print(f"✓ Saved final results summary to: {OUTPUT_PATH}/final_results_summary.txt")
     print("\n" + "="*80)
     
     

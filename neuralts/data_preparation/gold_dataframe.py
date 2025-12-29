@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import os
-
+import numpy as np
 import pandas as pd
 
 
@@ -193,6 +193,8 @@ def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = Fals
 
     df_gold = kba_df[columns_to_keep].copy()
 
+    df_map_ts_key = kba_df[["ts_key", "OEM", "Model", "drive_type"]].drop_duplicates()
+
     df_gold = apply_timeseries_cleaning(df_gold)
 
     if zero_padding:
@@ -201,6 +203,7 @@ def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = Fals
     # # Create autorregressive features
     # df_gold = create_rolling_features(df_gold, windows=[3, 6, 9], embargo=1)
 
+    df_org = df_gold.copy()
 
     if config.include_employment_level:
         employment_level_df = pd.read_parquet(config.employment_level_path, engine="pyarrow")
@@ -276,14 +279,24 @@ def create_gold_dataframe(config: GoldDataFrameConfig, zero_padding: bool = Fals
     if not zero_padding:
         # Ensure row count matches original KBA data if no padding applied
         assert (
-            df_gold.shape[0] == kba_df.shape[0]
+            df_gold.shape[0] == df_org.shape[0]
             ), "Row count mismatch after merging features. Please check the merge operations."
 
     # Sort by ts_key and Date
     df_gold = df_gold.sort_values(by=["ts_key", "Date"]).reset_index(drop=True)
 
     # Add columns back "OEM", "Model", "drive_type"
-    # TODO
+    df_gold = df_gold.merge(df_map_ts_key, on="ts_key", how="left")
+
+    # Add sin(month) and cos(month) 
+    df_gold['Year'] = df_gold['Date'].dt.year
+    df_gold['Month'] = df_gold['Date'].dt.month
+    # df_gold['sin_month'] = np.sin(2 * np.pi * df_gold['Month'] / 12)
+    # df_gold['cos_month'] = np.cos(2 * np.pi * df_gold['Month'] / 12)
+
+    # # Add scaled year 
+    # df_gold['Year'] = df_gold['Date'].dt.year
+    # df_gold['scaled_year'] = (df_gold['Year'] - df_gold['Year'].min()) / (df_gold['Year'].max() - df_gold['Year'].min())    
 
     return df_gold
 

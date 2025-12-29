@@ -5,12 +5,17 @@ import numpy as np
 import pandas as pd
 import warnings
 import time
+import os
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import wandb
 
 from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster, 
                             CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
-from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
+from neuralts.core.func import (TimeSeriesDatasetVectorizedExog, 
+                    generate_out_of_sample_predictions_vectorized_exog, WandBLoggingCallback)
+
+from neuralforecast.losses.pytorch import MSE, MAE
 
 
 warnings.filterwarnings('ignore')
@@ -22,16 +27,31 @@ if __name__ == "__main__":
     # ========================================================================
     # TRAINING PARAMETERS
     # ========================================================================
-
-    MODE = "UNI"  # Options: "UNI": Univariate, "MULTI": Multivariate
     
+
+    MODEL = 'BASELINE'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NBEATSx'
+    EXOG = False  # Use exogenous features
+    ENTITY_NAME = "tensor-torres"  
+    PROJECT_NAME = "neuralnetworks-timeseries" 
+
+    PYTORCH_SEED = 42
+    LOSS = MAE() # criterion = nn.L1Loss()
+    criterion = nn.L1Loss() # equivalent to MAE
+
+    # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
+    OPTIMIZE_HYPERPARAMETERS = True  # Set to False to skip optimization
+    N_TRIALS = 5  # Number of Optuna trials
+    OPTUNA_TIMEOUT = 900  # Timeout in seconds 15 minutes
+
     SEQ_LENGTH = 6
     TRAIN_RATIO = 0.8
     EMBARGO = 1
-    EPOCHS = 25
-    BATCH_SIZE = 64
+    EPOCHS = 30
+    BATCH_SIZE = 8
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
+
+    # -----------------------------------------------------------------------
 
     MLP_LAYERS = 2
     MLP_HIDDEN_SIZE = 512
@@ -58,16 +78,52 @@ if __name__ == "__main__":
     TRANSFORMER_LAYERS = 2
     TRANSFORMER_DIM_FEEDFORWARD = 256
     TRANSFORMER_DROPOUT = 0.2
+    
+    # NBEATSx hyperparameters
+    NBEATSX_DROPOUT = 0.5
+    NBEATSX_MAX_STEPS = 500
+    NBEATSX_N_HARMONICS = 2
+    NBEATSX_N_BASIS = 2
+    NBEATSX_N_BLOCKS = [1, 1, 1]
+    NBEATSX_MLP_UNITS = [[512, 512], [512, 512], [512, 512]]
 
-    # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
-    OPTIMIZE_HYPERPARAMETERS = True  # Set to False to skip optimization
-    N_TRIALS = 3  # Number of Optuna trials
-    OPTUNA_TIMEOUT = 900  # Timeout in seconds (15 minutes)
+    # NBEATS hyperparameters
+    NBEATS_DROPOUT = 0.5
+    NBEATS_MAX_STEPS = 500
+    NBEATS_N_HARMONICS = 2
+    NBEATS_N_BASIS = 2
+    NBEATS_N_BLOCKS = [1, 1, 1]
+    NBEATS_MLP_UNITS = [[512, 512], [512, 512], [512, 512]]
 
-    MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
+    TOTAL_SCRIPT_RUNTIME = None
+    TOTAL_TRAINING_TIME_FOLDS = dict()
+    TOTAL_OPTIMIZATION_TIME = None
+
+
+
+    GLOBAL_PATH = os.getcwd()
+
+    MODE = None
+    if not EXOG:
+        MODE = "MULTI_VEC"
+        MODEL_FOLDER = MODEL.lower() + "_" + MODE.lower()
+    else:
+        MODE = "MULTI_VEC_EXOG"
+        MODEL_FOLDER = MODEL.lower() + "_" + MODE.lower()
+        
+    OUTPUT_PATH = os.path.join(GLOBAL_PATH, "models", MODEL_FOLDER)
+    os.makedirs(OUTPUT_PATH, exist_ok=True)
+    df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold_padding.parquet")
 
     # ========================================================================
 
+    torch.manual_seed(PYTORCH_SEED)
+    np.random.seed(PYTORCH_SEED)
+    torch.cuda.manual_seed_all(PYTORCH_SEED)
+    torch.backends.cudnn.deterministic = True # Ensures reproducibility
+    torch.backends.cudnn.benchmark = False # Ensures reproducibility
+
+    SCRIPT_START_TIME = time.time()
 
     # Check MPS availability
     if torch.backends.mps.is_available():
@@ -83,31 +139,23 @@ if __name__ == "__main__":
     print(f"Device: {device}")
 
 
+    df_full = pd.read_parquet(df_path, engine='pyarrow')
 
-    # Load data
-    import os
-    cwd = os.getcwd()
-    full_path = os.path.join(cwd, "data", "gold", "monthly_registration_volume_gold.parquet")
-    output_path = os.path.join(cwd, "models", MODEL.lower() + "_" + MODE.lower() + "_one_hot")
-    os.makedirs(output_path, exist_ok=True)
-
-    df_full = pd.read_parquet(full_path, engine='pyarrow')
-    df_full['Year'] = df_full['Date'].dt.year
-    df_full['Month'] = df_full['Date'].dt.month
-
-    date_col = 'Date'
-    ts_key_col = 'ts_key'
-    value_col = 'Value'
-    #features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
+    cols_to_drop = ["OEM", "Model", "drive_type"]
+    df_full = df_full.drop(columns=cols_to_drop)
     
-    if MODE == "UNI":
-        features = ['Year', 'Month']
-    elif MODE == "MULTI":
-        features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
+    # Keep only required columns for vectorized dataset
+    base_columns = ['Date', 'ts_key', 'Value']
+    exog_columns = [df for df in df_full.columns if df not in base_columns]
+    
+    if not EXOG:
+        exog_columns = []
 
-    #Validate not NaN or infinite values in features
-    assert not df_full[features].isna().any().any(), "NaN values found in features"
-    assert not np.isinf(df_full[features].select_dtypes(include=[np.number])).any().any(), "Infinite values found in features"
+    df_full = df_full[['Date', 'ts_key', 'Value'] + exog_columns].copy()
+    
+    # Validate not NaN or infinite values
+    assert not df_full['Value'].isna().any(), "NaN values found in Value column"
+    assert not np.isinf(df_full['Value']).any(), "Infinite values found in Value column"
 
     print("="*80)
     print("DATA OVERVIEW")
@@ -165,10 +213,10 @@ if __name__ == "__main__":
     # ========================================================================
     # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
     # ========================================================================
-    
-    if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+    best_trial = None
+    if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE']:
         import optuna
-        from neuralts.core.func import create_univariate_model_from_trial, train_with_early_stopping
+        from neuralts.core.func import create_model_from_trial, train_with_early_stopping_vectorized
         
         print("\n" + "="*80)
         print("HYPERPARAMETER OPTIMIZATION WITH OPTUNA")
@@ -184,19 +232,19 @@ if __name__ == "__main__":
         print(f"\nUsing {fold_config['name']} for optimization")
         print(f"  Training observations: {len(df_train):,}")
         
-        # Create datasets
-        train_dataset = TimeSeriesDataset(
+        # Create vectorized datasets with exogenous features
+        train_dataset = TimeSeriesDatasetVectorizedExog(
             df_train,
-            feature_cols=features,
+            exog_cols=exog_columns,
             seq_length=SEQ_LENGTH,
             embargo=EMBARGO,
             train=True,
             train_ratio=TRAIN_RATIO
         )
         
-        val_dataset = TimeSeriesDataset(
+        val_dataset = TimeSeriesDatasetVectorizedExog(
             df_train,
-            feature_cols=features,
+            exog_cols=exog_columns,
             seq_length=SEQ_LENGTH,
             train=False,
             embargo=EMBARGO,
@@ -205,7 +253,11 @@ if __name__ == "__main__":
             scaler_y=train_dataset.scaler_y
         )
         
-        INPUT_SIZE_OPT = train_dataset.X.shape[2]
+        # Input size: features per timestep (no one-hot encoding needed)
+        INPUT_SIZE_OPT = train_dataset.X.shape[3]  # Shape: (n_windows, n_series, seq_length, n_features)
+        
+        # Store original dataframe for NeuralForecast models
+        train_dataset_df = df_train.copy()
         
         print(f"\nOptimization dataset:")
         print(f"  Training samples: {len(train_dataset):,}")
@@ -214,32 +266,113 @@ if __name__ == "__main__":
         
         def objective(trial):
             """
-            Optuna objective function for hyperparameter optimization.
+            Optuna objective function for hyperparameter optimization with vectorized batching.
             """
             # Suggest hyperparameters
             learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
-            batch_size = trial.suggest_categorical('batch_size', [32, 64, 128])
+            batch_size = trial.suggest_categorical('batch_size', [4, 8, 16])  # Smaller batches for vectorized
             
             # Create model with trial hyperparameters
-            model, hyperparams = create_univariate_model_from_trial(
+            model, hyperparams = create_model_from_trial(
                 MODEL, trial, INPUT_SIZE_OPT, SEQ_LENGTH
             )
-            model = model.to(device)
             
-            # Create data loaders
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            # Special handling for NeuralForecast models (NBEATS, NBEATSx)
+            if MODEL in ['NBEATS', 'NBEATSx']:
+                from neuralforecast import NeuralForecast
+                from neuralforecast.models import NBEATS, NBEATSx
+                
+                # Prepare data in NeuralForecast format
+                df_train_nf = train_dataset_df.copy()
+                df_train_nf = df_train_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
+                
+                # Split into train/val based on chronological split
+                n_unique_dates = len(df_train_nf['ds'].unique())
+                val_size = int(n_unique_dates * (1 - TRAIN_RATIO))
+                
+                if MODEL == 'NBEATS':
+                    df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
+                    
+                    nf_model = NBEATS(
+                        input_size=SEQ_LENGTH,
+                        loss=LOSS,
+                        h=val_size,
+                        dropout_prob_theta=hyperparams['dropout_prob_theta'],
+                        max_steps=hyperparams['max_steps'],
+                        n_harmonics=hyperparams['n_harmonics'],
+                        n_polynomials=hyperparams['n_polynomials'],
+                        stack_types=hyperparams['stack_types'],
+                        n_blocks=hyperparams['n_blocks'],
+                        mlp_units=hyperparams['mlp_units'],
+                        scaler_type='robust',
+                        random_seed=PYTORCH_SEED
+                    )
+                    
+                    nf = NeuralForecast(models=[nf_model], freq='ME')
+                    nf.fit(df=df_train_nf, val_size=val_size)
+                    
+                elif MODEL == 'NBEATSx':
+                    if EXOG:
+                        df_train_nf = df_train_nf[['unique_id', 'ds', 'y'] + exog_columns].sort_values(['unique_id', 'ds'])
+                    else:
+                        df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
+                    
+                    # Create static dataframe with one-hot encoded series IDs
+                    unique_ids = df_train_nf['unique_id'].unique()
+                    static_df = pd.DataFrame({'unique_id': unique_ids})
+                    for uid in unique_ids:
+                        static_df[f'id_{uid}'] = (static_df['unique_id'] == uid).astype(int)
+                    
+                    stat_exog_list = [f'id_{uid}' for uid in unique_ids]
+                    
+                    nf_model = NBEATSx(
+                        input_size=SEQ_LENGTH,
+                        h=val_size,
+                        loss=LOSS,
+                        dropout_prob_theta=hyperparams['dropout_prob_theta'],
+                        max_steps=hyperparams['max_steps'],
+                        n_harmonics=hyperparams['n_harmonics'],
+                        n_polynomials=hyperparams['n_polynomials'],
+                        n_blocks=hyperparams['n_blocks'],
+                        mlp_units=hyperparams['mlp_units'],
+                        scaler_type='robust',
+                        stat_exog_list=stat_exog_list,
+                        futr_exog_list=exog_columns,
+                        random_seed=PYTORCH_SEED
+                    )
+                    
+                    nf = NeuralForecast(models=[nf_model], freq='ME')
+                    nf.fit(df=df_train_nf, static_df=static_df, val_size=val_size)
+                
+                # Get validation loss from trainer callback metrics
+                if hasattr(nf.models[0], 'trainer') and hasattr(nf.models[0].trainer, 'callback_metrics'):
+                    metrics = nf.models[0].trainer.callback_metrics
+                    best_val_loss = metrics.get('valid_loss', metrics.get('val_loss', float('inf')))
+                    if isinstance(best_val_loss, torch.Tensor):
+                        best_val_loss = best_val_loss.item()
+                else:
+                    best_val_loss = float('inf')
+                
+                return best_val_loss
             
-            # Train with early stopping
-            best_val_loss, _ = train_with_early_stopping(
-                model, train_loader, val_loader, device,
-                learning_rate=learning_rate,
-                weight_decay=WEIGHT_DECAY,
-                max_epochs=30,
-                patience=5
-            )
-            
-            return best_val_loss
+            else:
+                # Standard PyTorch models
+                model = model.to(device)
+                
+                # Create data loaders with vectorized dataset
+                train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+                val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+                
+                # Train with vectorized early stopping
+                best_val_loss, _ = train_with_early_stopping_vectorized(
+                    model, train_loader, val_loader, device, SEQ_LENGTH,
+                    learning_rate=learning_rate,
+                    weight_decay=WEIGHT_DECAY,
+                    max_epochs=EPOCHS,
+                    patience=5
+                )
+                
+                return best_val_loss
         
         # Create and run study
         study = optuna.create_study(
@@ -248,9 +381,11 @@ if __name__ == "__main__":
             pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=10)
         )
         
-        print("\nStarting optimization...")
+        OPTIMIZATION_START_TIME = time.time()
         study.optimize(objective, n_trials=N_TRIALS, timeout=OPTUNA_TIMEOUT, show_progress_bar=True)
-        
+        TOTAL_OPTIMIZATION_TIME = (time.time() - OPTIMIZATION_START_TIME) / 60.0  # in minutes
+        print(f"\nOptimization completed in {TOTAL_OPTIMIZATION_TIME:.1f} minutes")
+
         print("\n" + "="*80)
         print("OPTIMIZATION RESULTS")
         print("="*80)
@@ -298,18 +433,37 @@ if __name__ == "__main__":
             TRANSFORMER_DIM_FEEDFORWARD = best_trial.params.get('dim_feedforward', TRANSFORMER_DIM_FEEDFORWARD)
             TRANSFORMER_DROPOUT = best_trial.params.get('dropout', TRANSFORMER_DROPOUT)
         
+        elif MODEL == 'NBEATS':
+            NBEATS_DROPOUT = best_trial.params.get('dropout_prob_theta', NBEATS_DROPOUT)
+            NBEATS_MAX_STEPS = best_trial.params.get('max_steps', NBEATS_MAX_STEPS)
+            NBEATS_N_HARMONICS = best_trial.params.get('n_harmonics', NBEATS_N_HARMONICS)
+            NBEATS_N_BASIS = best_trial.params.get('n_polynomials', NBEATS_N_BASIS)
+            NBEATS_N_BLOCKS = best_trial.params.get('n_blocks', NBEATS_N_BLOCKS)
+            mlp_size = best_trial.params.get('mlp_size', 512)
+            NBEATS_MLP_UNITS = [[mlp_size, mlp_size]] * len(NBEATS_N_BLOCKS)
+        
+        elif MODEL == 'NBEATSx':
+            NBEATSX_DROPOUT = best_trial.params.get('dropout_prob_theta', NBEATSX_DROPOUT)
+            NBEATSX_MAX_STEPS = best_trial.params.get('max_steps', NBEATSX_MAX_STEPS)
+            NBEATSX_N_HARMONICS = best_trial.params.get('n_harmonics', NBEATSX_N_HARMONICS)
+            NBEATSX_N_BASIS = best_trial.params.get('n_polynomials', NBEATSX_N_BASIS)
+            NBEATSX_N_BLOCKS = best_trial.params.get('n_blocks', NBEATSX_N_BLOCKS)
+            mlp_size = best_trial.params.get('mlp_size', 512)
+            NBEATSX_MLP_UNITS = [[mlp_size, mlp_size]] * len(NBEATSX_N_BLOCKS)
+        
         print(f"\n✓ Hyperparameters updated with best trial values")
-        print(f"  Learning rate: {LEARNING_RATE:.6f}")
-        print(f"  Batch size: {BATCH_SIZE}")
+        if MODEL not in ['NBEATS', 'NBEATSx']:
+            print(f"  Learning rate: {LEARNING_RATE:.6f}")
+            print(f"  Batch size: {BATCH_SIZE}")
         
         # Save optimization results
-        optuna_results_path = os.path.join(output_path, 'optuna_results.csv')
+        optuna_results_path = os.path.join(OUTPUT_PATH, 'optuna_results.csv')
         trials_df = study.trials_dataframe()
         trials_df.to_csv(optuna_results_path, index=False)
         print(f"\n✓ Saved Optuna results to: {optuna_results_path}")
         
         # Save best hyperparameters
-        best_params_path = os.path.join(output_path, 'best_hyperparameters.txt')
+        best_params_path = os.path.join(OUTPUT_PATH, 'best_hyperparameters.txt')
         with open(best_params_path, 'w') as f:
             f.write(f"Best Hyperparameters for {MODEL}\n")
             f.write("="*60 + "\n\n")
@@ -319,7 +473,7 @@ if __name__ == "__main__":
                 f.write(f"  {key}: {value}\n")
         print(f"✓ Saved best hyperparameters to: {best_params_path}")
     
-    elif MODEL in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+    elif MODEL == 'BASELINE':
         print(f"\n⚠ Skipping hyperparameter optimization for {MODEL} model")
     else:
         print("\n⚠ Hyperparameter optimization disabled (OPTIMIZE_HYPERPARAMETERS=False)")
@@ -336,12 +490,101 @@ if __name__ == "__main__":
     for fold_idx, fold_config in enumerate(folds):
         
         # Fold Variables
-        fold_output_dir = os.path.join(output_path, f"fold_{fold_idx + 1}")
+        fold_output_dir = os.path.join(OUTPUT_PATH, f"fold_{fold_idx + 1}")
         os.makedirs(fold_output_dir, exist_ok=True)
 
         print("\n" + "="*80)
         print(f"{fold_config['name'].upper()}: {fold_config['test_start']} to {fold_config['test_end']}")
         print("="*80)
+        
+        # Initialize W&B for this fold
+        wandb_run = None
+        # Prepare config based on model type
+        wandb_config = {
+            "model": MODEL,
+            "fold": fold_config['name'],
+            "seq_length": SEQ_LENGTH,
+            "embargo": EMBARGO,
+            "train_ratio": TRAIN_RATIO,
+            "epochs": EPOCHS,
+            "batch_size": BATCH_SIZE,
+            "learning_rate": LEARNING_RATE,
+            "weight_decay": WEIGHT_DECAY,
+            "exogenous_features": EXOG,
+            "n_exog_features": len(exog_columns) if EXOG else 0,
+            "train_end": fold_config['train_end'],
+            "test_start": fold_config['test_start'],
+            "test_end": fold_config['test_end']
+        }
+        
+        # Add model-specific hyperparameters
+        if MODEL == 'MLP':
+            wandb_config.update({
+                "num_layers": MLP_LAYERS,
+                "hidden_size": MLP_HIDDEN_SIZE,
+                "dropout": MLP_DROPOUT
+            })
+        elif MODEL == 'LSTM':
+            wandb_config.update({
+                "num_layers": LSTM_LAYERS,
+                "hidden_size": LSTM_HIDDEN_SIZE,
+                "dropout": LSTM_DROPOUT
+            })
+        elif MODEL == 'RNN':
+            wandb_config.update({
+                "num_layers": RNN_LAYERS,
+                "hidden_size": RNN_HIDDEN_SIZE,
+                "dropout": RNN_DROPOUT
+            })
+        elif MODEL == 'GRU':
+            wandb_config.update({
+                "num_layers": GRU_LAYERS,
+                "hidden_size": GRU_HIDDEN_SIZE,
+                "dropout": GRU_DROPOUT
+            })
+        elif MODEL == 'CNN1D':
+            wandb_config.update({
+                "num_layers": CNN_LAYERS,
+                "hidden_size": CNN_HIDDEN_SIZE,
+                "dropout": CNN_DROPOUT
+            })
+        elif MODEL in ['Transformer', 'TransformerCLS']:
+            wandb_config.update({
+                "d_model": TRANSFORMER_D_MODEL,
+                "nhead": TRANSFORMER_NHEAD,
+                "num_layers": TRANSFORMER_LAYERS,
+                "dim_feedforward": TRANSFORMER_DIM_FEEDFORWARD,
+                "dropout": TRANSFORMER_DROPOUT
+            })
+        elif MODEL in ['NBEATS']:
+            wandb_config.update({
+                "dropout_prob_theta": NBEATS_DROPOUT,
+                "max_steps": NBEATS_MAX_STEPS,
+                "n_harmonics": NBEATS_N_HARMONICS,
+                "n_basis": NBEATS_N_BASIS,
+                "n_blocks": NBEATS_N_BLOCKS,
+                "mlp_units": NBEATS_MLP_UNITS
+            })
+        elif MODEL in ['NBEATSx']:
+            wandb_config.update({
+                "dropout_prob_theta": NBEATSX_DROPOUT,
+                "max_steps": NBEATSX_MAX_STEPS,
+                "n_harmonics": NBEATSX_N_HARMONICS,
+                "n_basis": NBEATSX_N_BASIS,
+                "n_blocks": NBEATSX_N_BLOCKS,
+                "mlp_units": NBEATSX_MLP_UNITS
+            })
+        
+        # Initialize W&B run (for all models including BASELINE)
+        if MODEL != 'BASELINE':
+            wandb_run = wandb.init(
+                entity=ENTITY_NAME,
+                project=PROJECT_NAME,
+                name=f"{MODEL}__{MODE}__{fold_config['name'].replace(' ', '_')}",
+                config=wandb_config,
+                reinit=True  # Allow multiple runs in same script
+            )
+            print(f"\n✓ Initialized W&B run: {wandb_run.name}")
         
         # Filter training data up to train_end date
         df_train = df_full[df_full['Date'] <= fold_config['train_end']].copy()
@@ -406,6 +649,16 @@ if __name__ == "__main__":
             all_acts = np.array(all_acts)
             
             print(f"✓ Generated {len(all_preds)} baseline predictions")
+            
+            # Initialize W&B for BASELINE model
+            wandb_run = wandb.init(
+                entity=ENTITY_NAME,
+                project=PROJECT_NAME,
+                name=f"{MODEL}__{MODE}__{fold_config['name'].replace(' ', '_')}",
+                config=wandb_config,
+                reinit=True
+            )
+            print(f"\n✓ Initialized W&B run: {wandb_run.name}")
         
         # -----------------------------------------------------------------
         # NBEATS MODEL: Neural Basis Expansion Analysis
@@ -434,25 +687,36 @@ if __name__ == "__main__":
             
             print(f"Training NBEATS with input_size={SEQ_LENGTH}, horizon={horizon}")
             
+            wb_callback = WandBLoggingCallback(wandb_run)
+
             # Initialize model
             models = [
                 NBEATS(
+                    loss=LOSS,
                     input_size=SEQ_LENGTH,
                     h=horizon,
-                    max_steps=500,
+                    max_steps=NBEATS_MAX_STEPS,
                     scaler_type='robust',
-                    random_seed=42, 
+                    random_seed=PYTORCH_SEED, 
+                    n_harmonics=NBEATS_N_HARMONICS,
+                    n_basis=NBEATS_N_BASIS,
+                    n_blocks=NBEATS_N_BLOCKS,
+                    mlp_units=NBEATS_MLP_UNITS,
+                    dropout_prob_theta=NBEATS_DROPOUT,
+                    callbacks=[wb_callback] 
                 )                
             ]
+
             
             nf = NeuralForecast(models=models, freq='ME')  # ME = Month End
-            
+        
             # Train model
             nf.fit(df=df_train_nf, val_size=horizon)
             
             # Generate predictions
             Y_hat_df = nf.predict().reset_index()
             
+
             # Prepare test data in same format
             df_test_nf = df_test_period.copy()
             df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
@@ -485,66 +749,110 @@ if __name__ == "__main__":
             print(f"✓ Generated {len(all_preds)} NBEATS predictions")
         
         # -----------------------------------------------------------------
-        # NHITS MODEL: Neural Hierarchical Interpolation for Time Series
+        # NBEATSx MODEL: NBEATS with Exogenous Variables
         # -----------------------------------------------------------------
-        elif MODEL == 'NHITS':
+        elif MODEL == 'NBEATSx':
             print("\n" + "-"*60)
-            print("NHITS MODEL: Neural Hierarchical Interpolation for Time Series")
+            print("NBEATSx MODEL: NBEATS with Exogenous Variables")
             print("-"*60)
+
+            assert EXOG, "NBEATSx model requires EXOG=True to include exogenous features"
             
             from neuralforecast import NeuralForecast
-            from neuralforecast.models import NHITS
+            from neuralforecast.models import NBEATSx
+            
+            wb_callback = WandBLoggingCallback(wandb_run)
             
             # Prepare data in neuralforecast format
             df_train_nf = df_train.copy()
             df_train_nf = df_train_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
             
+         
+            # Include exogenous features
+            df_train_nf = df_train_nf[['unique_id', 'ds', 'y'] + exog_columns].sort_values(['unique_id', 'ds'])
+
             # Get test period data
             df_test_period = df_full[
                 (df_full['Date'] >= fold_config['test_start']) & 
                 (df_full['Date'] <= fold_config['test_end'])
             ].copy()
             
-            # Calculate horizon
+            # Calculate horizon (number of months to forecast)
             horizon = len(df_test_period['Date'].unique())
             
-            print(f"Training NHITS with input_size={SEQ_LENGTH}, horizon={horizon}")
+            # Create static dataframe with one-hot encoded series IDs
+            unique_ids = df_train_nf['unique_id'].unique()
+            static_df = pd.DataFrame({'unique_id': unique_ids})
             
-            # Initialize model
+            # One-hot encode the series IDs
+            for uid in unique_ids:
+                static_df[f'id_{uid}'] = (static_df['unique_id'] == uid).astype(int)
+            
+            print(f"Training NBEATSx with input_size={SEQ_LENGTH}, horizon={horizon}, exog={EXOG}")
+            print(f"Static features (one-hot encoded series): {len(unique_ids)}")
+            if EXOG:
+                print(f"Future exogenous features: {exog_columns}")
+            
+            # Initialize model with stat_exog_list and optional futr_exog_list
+            stat_exog_list = [f'id_{uid}' for uid in unique_ids]
+            
+
             models = [
-                NHITS(
+                NBEATSx(
+                    loss=LOSS,
                     input_size=SEQ_LENGTH,
                     h=horizon,
-                    max_steps=500,
+                    dropout_prob_theta=NBEATSX_DROPOUT,
+                    max_steps=NBEATSX_MAX_STEPS,
+                    n_harmonics=NBEATSX_N_HARMONICS,
+                    n_polynomials=NBEATSX_N_BASIS,
+                    n_blocks=NBEATSX_N_BLOCKS,
+                    mlp_units=NBEATSX_MLP_UNITS,
                     scaler_type='robust',
-                    random_seed=42
+                    stat_exog_list=stat_exog_list,
+                    futr_exog_list=exog_columns,
+                    random_seed=PYTORCH_SEED,
+                    callbacks=[wb_callback]
                 )
             ]
-            
-            nf = NeuralForecast(models=models, freq='MS')
+
+            nf = NeuralForecast(models=models, freq='ME')  # ME = Month End
             
             # Train model
-            nf.fit(df=df_train_nf, val_size=horizon)
+            print("Training NBEATSx model...")
+            nf.fit(df=df_train_nf, static_df=static_df, val_size=horizon)
             
-            # Generate predictions
-            Y_hat_df = nf.predict().reset_index()
+            # Log training metrics from NeuralForecast trainer
+            if hasattr(nf.models[0], 'trainer') and hasattr(nf.models[0].trainer, 'callback_metrics'):
+                metrics = nf.models[0].trainer.callback_metrics
+                for metric_name, metric_value in metrics.items():
+                    if isinstance(metric_value, torch.Tensor):
+                        wandb_run.log({f"train_{metric_name}": metric_value.item()})
+                print(f"✓ Logged {len(metrics)} training metrics to W&B")
             
-            # Prepare test data
+
+            # Prepare future exogenous features for prediction
             df_test_nf = df_test_period.copy()
             df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_test_nf = df_test_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
+            df_test_nf = df_test_nf[['unique_id', 'ds'] + exog_columns].sort_values(['unique_id', 'ds'])
+            Y_hat_df = nf.predict(futr_df=df_test_nf).reset_index()
+
+            
+            # Prepare test data in same format
+            df_test_nf_full = df_test_period.copy()
+            df_test_nf_full = df_test_nf_full.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
+            df_test_nf_full = df_test_nf_full[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
             
             # Merge predictions with actuals
-            df_results = pd.merge(df_test_nf, Y_hat_df, on=['unique_id', 'ds'], how='left')
+            df_results = pd.merge(df_test_nf_full, Y_hat_df, on=['unique_id', 'ds'], how='left')
             
-            # Extract predictions and actuals
+            # Extract predictions and actuals per time series
             predictions_dict = {}
             actuals_dict = {}
             
             for ts_key in df_results['unique_id'].unique():
                 ts_data = df_results[df_results['unique_id'] == ts_key].sort_values('ds')
-                preds = ts_data['NHITS'].values
+                preds = ts_data['NBEATSx'].values
                 acts = ts_data['y'].values
                 
                 # Replace negative predictions with 0
@@ -559,113 +867,38 @@ if __name__ == "__main__":
             all_preds = np.concatenate([v for v in predictions_dict.values()])
             all_acts = np.concatenate([v for v in actuals_dict.values()])
             
-            print(f"✓ Generated {len(all_preds)} NHITS predictions")
-        
-        # -----------------------------------------------------------------
-        # KAN MODEL: Kolmogorov-Arnold Networks
-        # -----------------------------------------------------------------
-        elif MODEL == 'KAN':
-            print("\n" + "-"*60)
-            print("KAN MODEL: Kolmogorov-Arnold Networks")
-            print("-"*60)
-            
-            from neuralforecast import NeuralForecast
-            from neuralforecast.models import KAN
-            
-            # Prepare data in neuralforecast format
-            df_train_nf = df_train.copy()
-            df_train_nf = df_train_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Get test period data
-            df_test_period = df_full[
-                (df_full['Date'] >= fold_config['test_start']) & 
-                (df_full['Date'] <= fold_config['test_end'])
-            ].copy()
-            
-            # Calculate horizon
-            horizon = len(df_test_period['Date'].unique())
-            
-            print(f"Training KAN with input_size={SEQ_LENGTH}, horizon={horizon}")
-            
-            # Initialize model
-            models = [
-                KAN(
-                    input_size=SEQ_LENGTH,
-                    h=horizon,
-                    max_steps=500,
-                    scaler_type='robust',
-                    random_seed=42
-                )
-            ]
-            
-            nf = NeuralForecast(models=models, freq='MS')
-            
-            # Train model
-            nf.fit(df=df_train_nf, val_size=horizon)
-            
-            # Generate predictions
-            Y_hat_df = nf.predict().reset_index()
-            
-            # Prepare test data
-            df_test_nf = df_test_period.copy()
-            df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_test_nf = df_test_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Merge predictions with actuals
-            df_results = pd.merge(df_test_nf, Y_hat_df, on=['unique_id', 'ds'], how='left')
-            
-            # Extract predictions and actuals
-            predictions_dict = {}
-            actuals_dict = {}
-            
-            for ts_key in df_results['unique_id'].unique():
-                ts_data = df_results[df_results['unique_id'] == ts_key].sort_values('ds')
-                preds = ts_data['KAN'].values
-                acts = ts_data['y'].values
-                
-                # Replace negative predictions with 0
-                preds = np.maximum(preds, 0)
-                
-                # Handle NaN predictions
-                preds = np.nan_to_num(preds, nan=0.0)
-                
-                predictions_dict[ts_key] = preds
-                actuals_dict[ts_key] = acts
-            
-            all_preds = np.concatenate([v for v in predictions_dict.values()])
-            all_acts = np.concatenate([v for v in actuals_dict.values()])
-            
-            print(f"✓ Generated {len(all_preds)} KAN predictions")
-            
+            print(f"✓ Generated {len(all_preds)} NBEATSx predictions")
+   
         else:
             # -----------------------------------------------------------------
-            # STEP 1: Create datasets for model development (train/val split)
+            # STEP 1: Create VECTORIZED datasets with EXOGENOUS features for model development
             # -----------------------------------------------------------------
             print("\n" + "-"*60)
-            print("STEP 1: Creating datasets for model development")
+            print("STEP 1: Creating VECTORIZED datasets with EXOGENOUS features for model development")
             print("-"*60)
         
-            train_dataset = TimeSeriesDataset(
+            train_dataset = TimeSeriesDatasetVectorizedExog(
                 df_train,
-                feature_cols=features, 
+                exog_cols=exog_columns,
                 seq_length=SEQ_LENGTH,
                 embargo=EMBARGO,
                 train=True,
                 train_ratio=TRAIN_RATIO
             )
             
-            print(f"Training samples: {len(train_dataset):,}")
+            print(f"Training time windows: {len(train_dataset):,}")
+            print(f"Series per window: {train_dataset.n_series:,}")
+            print(f"Effective training samples: {len(train_dataset) * train_dataset.n_series:,}")
             
             # Save scalers and metadata
             scaler_X = train_dataset.scaler_X
             scaler_y = train_dataset.scaler_y
-            n_ts_keys = train_dataset.n_ts_keys
+            n_series = train_dataset.n_series
             ts_key_to_idx = train_dataset.ts_key_to_idx
             
-            test_dataset = TimeSeriesDataset(
+            test_dataset = TimeSeriesDatasetVectorizedExog(
                 df_train,
-                feature_cols=features,
+                exog_cols=exog_columns,
                 seq_length=SEQ_LENGTH,
                 train=False,
                 embargo=EMBARGO,
@@ -674,16 +907,19 @@ if __name__ == "__main__":
                 scaler_y=scaler_y
             )
             
-            print(f"Validation samples: {len(test_dataset):,}")
+            print(f"Validation time windows: {len(test_dataset):,}")
+            print(f"Effective validation samples: {len(test_dataset) * train_dataset.n_series:,}")
         
         # -----------------------------------------------------------------
-        # STEP 2: Initialize and train model
+        # STEP 2: Initialize and train model with VECTORIZED batching
         # -----------------------------------------------------------------
             print("\n" + "-"*60)
-            print(f"STEP 2: Training {MODEL} model")
+            print(f"STEP 2: Training {MODEL} model with VECTORIZED batching")
             print("-"*60)
             
-            INPUT_SIZE = train_dataset.X.shape[2]
+            # Input size: features per timestep (no one-hot encoding)
+            INPUT_SIZE = train_dataset.X.shape[3]  # (n_windows, n_series, seq_length, n_features)
+            print(f"Input size per timestep: {INPUT_SIZE} features")
             
             if MODEL == 'LSTM':
                 model = LSTMForecaster(
@@ -744,10 +980,14 @@ if __name__ == "__main__":
         
             print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
             
-            train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-            val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+            # Use smaller batch size for vectorized (each batch processes all series)
+            VECTORIZED_BATCH_SIZE = 16
+            train_loader = DataLoader(train_dataset, batch_size=VECTORIZED_BATCH_SIZE, shuffle=False)
+            val_loader = DataLoader(test_dataset, batch_size=VECTORIZED_BATCH_SIZE, shuffle=False)
             
-            criterion = nn.L1Loss()
+            print(f"Batch size: {VECTORIZED_BATCH_SIZE} time windows (processes {VECTORIZED_BATCH_SIZE * n_series:,} predictions per batch)")
+            
+    
             optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
             
@@ -757,14 +997,57 @@ if __name__ == "__main__":
             
             start_time = time.time()
             
+            # Training loop with VECTORIZED batching
             for epoch in range(EPOCHS):
-                train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-                val_loss = evaluate(model, val_loader, criterion, device)
+                # Training
+                model.train()
+                total_train_loss = 0
+                
+                for X_batch, y_batch in train_loader:
+                    # X_batch: (batch_time, n_series, seq_length, n_features)
+                    # Reshape to (batch_time * n_series, seq_length, n_features)
+                    X_batch = X_batch.reshape(-1, SEQ_LENGTH, INPUT_SIZE).to(device)
+                    y_batch = y_batch.reshape(-1, 1).to(device)
+                    
+                    optimizer.zero_grad()
+                    predictions = model(X_batch)
+                    loss = criterion(predictions, y_batch)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
+                    
+                    total_train_loss += loss.item()
+                
+                train_loss = total_train_loss / len(train_loader)
+                
+                # Validation
+                model.eval()
+                total_val_loss = 0
+                
+                with torch.no_grad():
+                    for X_batch, y_batch in val_loader:
+                        X_batch = X_batch.reshape(-1, SEQ_LENGTH, INPUT_SIZE).to(device)
+                        y_batch = y_batch.reshape(-1, 1).to(device)
+                        
+                        predictions = model(X_batch)
+                        loss = criterion(predictions, y_batch)
+                        total_val_loss += loss.item()
+                
+                val_loss = total_val_loss / len(val_loader)
                 
                 train_losses.append(train_loss)
                 val_losses.append(val_loss)
                 
                 scheduler.step(val_loss)
+                
+                # Log metrics to W&B
+                if wandb_run is not None:
+                    wandb_run.log({
+                        "epoch": epoch + 1,
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "learning_rate": optimizer.param_groups[0]['lr']
+                    })
                 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -776,9 +1059,17 @@ if __name__ == "__main__":
             
             # Load best model
             model.load_state_dict(best_model_state)
+
+            training_time = time.time() - start_time  # in seconds
+
+            TOTAL_TRAINING_TIME_FOLDS[fold_config['name']] = training_time
+            
+            print(f"\nTraining completed in {training_time:.1f} seconds")
+            print(f"Best validation loss: {best_val_loss:.6f}")
             
             print(f"\nTraining completed in {time.time() - start_time:.1f}s")
             print(f"Best validation loss: {best_val_loss:.6f}")
+            print(f"Vectorized speedup: Processed {n_series:,} series simultaneously per time window!")
             
 
             # -----------------------------------------------------------------
@@ -792,15 +1083,16 @@ if __name__ == "__main__":
             ].copy()
 
 
-            predictions_dict, actuals_dict, all_preds, all_acts = generate_out_of_sample_predictions(model=model,
+            predictions_dict, actuals_dict, all_preds, all_acts = generate_out_of_sample_predictions_vectorized_exog(
+                model=model,
                 df_test_period=df_test_period,
                 df_full=df_full,
                 fold_config=fold_config,
-                features=features,
+                exog_cols=exog_columns,
                 scaler_X=scaler_X,
                 scaler_y=scaler_y,
                 ts_key_to_idx=ts_key_to_idx,
-                n_ts_keys=n_ts_keys,
+                n_ts_keys=n_series,
                 seq_length=SEQ_LENGTH,
                 embargo=EMBARGO,
                 device=device
@@ -896,17 +1188,31 @@ if __name__ == "__main__":
         print(f"  R²:    {r2:.4f}")
         print(f"  SMAPE: {smape_score:.2f}%")
         
+        # Log final test metrics to W&B
+        if wandb_run is not None:
+            wandb_run.log({
+                "test_mse": mse,
+                "test_rmse": rmse,
+                "test_mae": mae,
+                "test_r2": r2,
+                "test_smape": smape_score
+            })
+            
+            # Log SMAPE distribution
+            for cat in category_order:
+                wandb_run.log({
+                    f"smape_dist_{cat}_count": category_distribution[cat]['count'],
+                    f"smape_dist_{cat}_pct": category_distribution[cat]['percentage']
+                })
+        
         # Save model checkpoint (skip for baseline and neuralforecast models)
-        if MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+        if MODEL not in ['BASELINE', 'NBEATS', 'NBEATSx']:
             torch.save({
                 'model_state_dict': best_model_state,
                 'input_size': INPUT_SIZE,
-                'hidden_size': 64,
-                'num_layers': 2,
-                'dropout': 0.2,
                 'scaler_X': scaler_X,
                 'scaler_y': scaler_y,
-                'n_ts_keys': n_ts_keys,
+                'n_series': n_series,  # Updated from n_ts_keys to n_series for vectorized dataset
                 'ts_key_to_idx': ts_key_to_idx,
                 'seq_length': SEQ_LENGTH,
                 'fold_config': fold_config,
@@ -914,7 +1220,7 @@ if __name__ == "__main__":
             }, os.path.join(fold_output_dir, 'model_checkpoint.pth'))
         
         # Visualization (skip for baseline and neuralforecast models)
-        if MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+        if MODEL not in ['BASELINE', 'NBEATS', 'NBEATSx']:
             fig, axes = plt.subplots(1, 2, figsize=(15, 6))
             
             # Training history
@@ -958,6 +1264,11 @@ if __name__ == "__main__":
         plt.savefig(os.path.join(fold_output_dir, 'predictions_vs_actuals.png'), dpi=300, bbox_inches='tight')
         plt.close()
         
+        # Finish W&B run for this fold
+        if wandb_run is not None:
+            wandb_run.finish()
+            print(f"✓ Finished W&B run for {fold_config['name']}")
+        
         print(f"\n✓ Saved fold results to: {fold_output_dir}")
 
     # ========================================================================
@@ -991,11 +1302,11 @@ if __name__ == "__main__":
         print(f"  {cat:>10}: {avg_pct:5.1f}% ± {std_pct:4.1f}% ({avg_count:.0f} series avg)")
     
     # Save SMAPE distribution summary
-    smape_dist_df.to_csv(os.path.join(output_path, 'smape_distribution.csv'), index=False)
+    smape_dist_df.to_csv(os.path.join(OUTPUT_PATH, 'smape_distribution.csv'), index=False)
     
-    print(f"\n✓ Saved metrics to: {output_path}/fold_metrics.csv")
-    print(f"✓ Saved summary to: {output_path}/summary_metrics.csv")
-    print(f"✓ Saved SMAPE distribution to: {output_path}/smape_distribution.csv")
+    print(f"\n✓ Saved metrics to: {OUTPUT_PATH}/fold_metrics.csv")
+    print(f"✓ Saved summary to: {OUTPUT_PATH}/summary_metrics.csv")
+    print(f"✓ Saved SMAPE distribution to: {OUTPUT_PATH}/smape_distribution.csv")
     
     # ========================================================================
     # FINAL RESULTS: Average metrics across all folds
@@ -1023,7 +1334,7 @@ if __name__ == "__main__":
     print(f"  SMAPE: {avg_metrics['smape']:.2f}% ± {std_metrics['smape']:.2f}%")
     
     # Save metrics to CSV
-    metrics_df.to_csv(os.path.join(output_path, 'fold_metrics.csv'), index=False)
+    metrics_df.to_csv(os.path.join(OUTPUT_PATH, 'fold_metrics.csv'), index=False)
     
     # Save summary
     summary_dict = {
@@ -1034,19 +1345,41 @@ if __name__ == "__main__":
                 std_metrics['r2'], std_metrics['smape']]
     }
     summary_df = pd.DataFrame(summary_dict)
-    summary_df.to_csv(os.path.join(output_path, 'summary_metrics.csv'), index=False)
+    summary_df.to_csv(os.path.join(OUTPUT_PATH, 'summary_metrics.csv'), index=False)
     
     # ========================================================================
     # SAVE COMPREHENSIVE RESULTS TO TXT FILE
     # ========================================================================
     
-    results_txt_path = os.path.join(output_path, 'final_results_summary.txt')
+    TOTAL_SCRIPT_RUNTIME = (time.time() - SCRIPT_START_TIME) / 60.0  # in minutes
+    print(f"\nTotal script runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes")
+
+    results_txt_path = os.path.join(OUTPUT_PATH, 'final_results_summary.txt')
     
     with open(results_txt_path, 'w') as f:
         f.write("="*80 + "\n")
         f.write(f"{MODEL} MODEL - FINAL EVALUATION RESULTS\n")
         f.write("="*80 + "\n\n")
         
+        f.write(f"Model: {MODEL}\n")
+        if best_trial is not None:
+            f.write("Best Hyperparameters:\n")
+            for key, value in best_trial.params.items():
+                f.write(f"    {key}: {value}\n")
+        
+        # Total optimization time
+        if OPTIMIZE_HYPERPARAMETERS and best_trial is not None:
+            f.write(f"\nTotal Hyperparameter Optimization Time: {TOTAL_OPTIMIZATION_TIME:.1f} minutes\n")
+
+        # Training time per fold
+        f.write("\nTraining Time per Fold:\n")
+        for fold_name, training_time in TOTAL_TRAINING_TIME_FOLDS.items():
+            f.write(f"  {fold_name}: {training_time:.1f} seconds\n")
+        
+        f.write(f"\nTotal Script Runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes\n")
+        f.write("\n")
+
+
         # 1. FINAL RESULTS: AVERAGE METRICS ACROSS ALL FOLDS
         f.write("="*80 + "\n")
         f.write("1. FINAL RESULTS: AVERAGE METRICS ACROSS ALL FOLDS\n")
@@ -1093,9 +1426,9 @@ if __name__ == "__main__":
         f.write("END OF REPORT\n")
         f.write("="*80 + "\n")
     
-    print(f"\n✓ Saved metrics to: {output_path}/fold_metrics.csv")
-    print(f"✓ Saved summary to: {output_path}/summary_metrics.csv")
-    print(f"✓ Saved final results summary to: {output_path}/final_results_summary.txt")
+    print(f"\n✓ Saved metrics to: {OUTPUT_PATH}/fold_metrics.csv")
+    print(f"✓ Saved summary to: {OUTPUT_PATH}/summary_metrics.csv")
+    print(f"✓ Saved final results summary to: {OUTPUT_PATH}/final_results_summary.txt")
     print("\n" + "="*80)
     
     

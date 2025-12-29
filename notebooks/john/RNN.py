@@ -82,7 +82,7 @@ class RNNModel(nn.Module):
         return self.fc(last_hidden)
 
 model = RNNModel()
-criterion = nn.MSELoss()
+criterion = nn.L1Loss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 # --------------------------------------------------

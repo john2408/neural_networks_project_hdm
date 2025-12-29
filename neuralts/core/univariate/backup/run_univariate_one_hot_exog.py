@@ -12,6 +12,7 @@ from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster,
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
 import os
+import wandb
 
 warnings.filterwarnings('ignore')
 
@@ -23,7 +24,10 @@ if __name__ == "__main__":
     # ========================================================================
 
     MODE = "UNI"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
-    
+    MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
+    ENTITY_NAME = "tensor-torres"
+    PROJECT_NAME = "neuralnetworks-timeseries"
+
     PYTORCH_SEED = 42
     SEQ_LENGTH = 6
     TRAIN_RATIO = 0.8
@@ -64,7 +68,6 @@ if __name__ == "__main__":
     N_TRIALS = 3  # Number of Optuna trials
     OPTUNA_TIMEOUT = 900  # Timeout in seconds (15 minutes)
 
-    MODEL = 'BASELINE'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
 
     TOTAL_SCRIPT_RUNTIME = None
     TOTAL_TRAINING_TIME_FOLDS = dict()
@@ -103,16 +106,15 @@ if __name__ == "__main__":
 
     # Load data
     df_full = pd.read_parquet(df_path, engine='pyarrow')
-    df_full['Year'] = df_full['Date'].dt.year
-    df_full['Month'] = df_full['Date'].dt.month
 
     date_col = 'Date'
     ts_key_col = 'ts_key'
     value_col = 'Value'
-    #features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
     
     if MODE == "UNI":
-        features = ['Year', 'Month']
+        features = ['sin_month', 'cos_month', 'scaled_year']
+        drop_cols = ['Year', 'Month']
+        df_full = df_full.drop(columns=drop_cols)
     elif MODE == "EXO":
         features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
 
@@ -356,6 +358,77 @@ if __name__ == "__main__":
         print(f"{fold_config['name'].upper()}: {fold_config['test_start']} to {fold_config['test_end']}")
         print("="*80)
         
+        # Initialize W&B for this fold (skip for BASELINE model)
+        wandb_run = None
+        if MODEL not in ['BASELINE']:
+            # Prepare config based on model type
+            wandb_config = {
+                "model": MODEL,
+                "mode": MODE,
+                "fold": fold_config['name'],
+                "seq_length": SEQ_LENGTH,
+                "embargo": EMBARGO,
+                "train_ratio": TRAIN_RATIO,
+                "epochs": EPOCHS,
+                "batch_size": BATCH_SIZE,
+                "learning_rate": LEARNING_RATE,
+                "weight_decay": WEIGHT_DECAY,
+                "n_features": len(features) if MODE == "UNI" else "all",
+                "train_end": fold_config['train_end'],
+                "test_start": fold_config['test_start'],
+                "test_end": fold_config['test_end']
+            }
+            
+            # Add model-specific hyperparameters
+            if MODEL == 'MLP':
+                wandb_config.update({
+                    "num_layers": MLP_LAYERS,
+                    "hidden_size": MLP_HIDDEN_SIZE,
+                    "dropout": MLP_DROPOUT
+                })
+            elif MODEL == 'LSTM':
+                wandb_config.update({
+                    "num_layers": LSTM_LAYERS,
+                    "hidden_size": LSTM_HIDDEN_SIZE,
+                    "dropout": LSTM_DROPOUT
+                })
+            elif MODEL == 'RNN':
+                wandb_config.update({
+                    "num_layers": RNN_LAYERS,
+                    "hidden_size": RNN_HIDDEN_SIZE,
+                    "dropout": RNN_DROPOUT
+                })
+            elif MODEL == 'GRU':
+                wandb_config.update({
+                    "num_layers": GRU_LAYERS,
+                    "hidden_size": GRU_HIDDEN_SIZE,
+                    "dropout": GRU_DROPOUT
+                })
+            elif MODEL == 'CNN1D':
+                wandb_config.update({
+                    "num_layers": CNN_LAYERS,
+                    "hidden_size": CNN_HIDDEN_SIZE,
+                    "dropout": CNN_DROPOUT
+                })
+            elif MODEL in ['Transformer', 'TransformerCLS']:
+                wandb_config.update({
+                    "d_model": TRANSFORMER_D_MODEL,
+                    "nhead": TRANSFORMER_NHEAD,
+                    "num_layers": TRANSFORMER_LAYERS,
+                    "dim_feedforward": TRANSFORMER_DIM_FEEDFORWARD,
+                    "dropout": TRANSFORMER_DROPOUT
+                })
+            
+            # Initialize W&B run
+            wandb_run = wandb.init(
+                entity=ENTITY_NAME,
+                project=PROJECT_NAME,
+                name=f"{MODEL}__{MODE}_ONE_HOT__{fold_config['name'].replace(' ', '_')}",
+                config=wandb_config,
+                reinit=True  # Allow multiple runs in same script
+            )
+            print(f"\n✓ Initialized W&B run: {wandb_run.name}")
+        
         # Filter training data up to train_end date
         df_train = df_full[df_full['Date'] <= fold_config['train_end']].copy()
         
@@ -529,7 +602,7 @@ if __name__ == "__main__":
             train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
             val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
             
-            criterion = nn.MSELoss()
+            criterion = nn.L1Loss()
             optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
             
@@ -547,6 +620,15 @@ if __name__ == "__main__":
                 val_losses.append(val_loss)
                 
                 scheduler.step(val_loss)
+                
+                # Log metrics to W&B
+                if wandb_run is not None:
+                    wandb_run.log({
+                        "epoch": epoch + 1,
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "learning_rate": optimizer.param_groups[0]['lr']
+                    })
                 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
@@ -682,6 +764,23 @@ if __name__ == "__main__":
         print(f"  R²:    {r2:.4f}")
         print(f"  SMAPE: {smape_score:.2f}%")
         
+        # Log final test metrics to W&B
+        if wandb_run is not None:
+            wandb_run.log({
+                "test_mse": mse,
+                "test_rmse": rmse,
+                "test_mae": mae,
+                "test_r2": r2,
+                "test_smape": smape_score
+            })
+            
+            # Log SMAPE distribution
+            for cat in category_order:
+                wandb_run.log({
+                    f"smape_dist_{cat}_count": category_distribution[cat]['count'],
+                    f"smape_dist_{cat}_pct": category_distribution[cat]['percentage']
+                })
+        
         # Save model checkpoint
         if MODEL not in ['BASELINE']:
             torch.save({
@@ -743,6 +842,11 @@ if __name__ == "__main__":
         plt.tight_layout()
         plt.savefig(os.path.join(fold_output_dir, 'predictions_vs_actuals.png'), dpi=300, bbox_inches='tight')
         plt.close()
+        
+        # Finish W&B run for this fold
+        if wandb_run is not None:
+            wandb_run.finish()
+            print(f"✓ Finished W&B run for {fold_config['name']}")
         
         print(f"\n✓ Saved fold results to: {fold_output_dir}")
 

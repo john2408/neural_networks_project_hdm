@@ -7,6 +7,8 @@ data/
 report/_build/
 models/
 lightning_logs/
+wandb/
+wandb/latest-run/
 
 # C extensions
 *.so
@@ -210,3 +212,4 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+wandb/

@@ -12,7 +12,8 @@ import wandb
 from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster, 
                             CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
-from neuralts.core.func import TimeSeriesDatasetVectorizedExog, generate_out_of_sample_predictions_vectorized_exog
+from neuralts.core.func import (TimeSeriesDatasetVectorizedExog, 
+                    generate_out_of_sample_predictions_vectorized_exog, WandBLoggingCallback)
 
 
 warnings.filterwarnings('ignore')
@@ -26,7 +27,7 @@ if __name__ == "__main__":
     # ========================================================================
     
 
-    MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
+    MODEL = 'NBEATS'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NHITS', 'KAN'
     EXOG = False  # Use exogenous features
     ENTITY_NAME = "tensor-torres"  
     PROJECT_NAME = "neuralnetworks-timeseries" 
@@ -74,9 +75,17 @@ if __name__ == "__main__":
     TRANSFORMER_DIM_FEEDFORWARD = 256
     TRANSFORMER_DROPOUT = 0.2
 
+    NBEATS_N_HARMONICS = 2
+    NBEATS_N_BASIS = 2
+    NBEATS_BASIS = "polynomial"
+    NBEATS_N_BLOCKS = [1, 1, 1]
+    NBEATS_MLP_UNITS = [[512, 512], [512, 512], [512, 512]]
+
     TOTAL_SCRIPT_RUNTIME = None
     TOTAL_TRAINING_TIME_FOLDS = dict()
     TOTAL_OPTIMIZATION_TIME = None
+
+
 
     GLOBAL_PATH = os.getcwd()
 
@@ -118,8 +127,8 @@ if __name__ == "__main__":
 
     df_full = pd.read_parquet(df_path, engine='pyarrow')
 
-    # cols_to_drop = ['sin_month', 'cos_month', 'scaled_year']
-    # df_full = df_full.drop(columns=cols_to_drop)
+    cols_to_drop = ["OEM", "Model", "drive_type"]
+    df_full = df_full.drop(columns=cols_to_drop)
     
     # Keep only required columns for vectorized dataset
     base_columns = ['Date', 'ts_key', 'Value']
@@ -373,7 +382,7 @@ if __name__ == "__main__":
         
         # Initialize W&B for this fold (skip for optimization and certain models)
         wandb_run = None
-        if MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+        if MODEL not in ['BASELINE']:
             # Prepare config based on model type
             wandb_config = {
                 "model": MODEL,
@@ -430,6 +439,14 @@ if __name__ == "__main__":
                     "num_layers": TRANSFORMER_LAYERS,
                     "dim_feedforward": TRANSFORMER_DIM_FEEDFORWARD,
                     "dropout": TRANSFORMER_DROPOUT
+                })
+            elif MODEL in ['NBEATS']:
+                wandb_config.update({
+                    "n_harmonics": NBEATS_N_HARMONICS,
+                    "n_basis": NBEATS_N_BASIS,
+                    "basis": NBEATS_BASIS,
+                    "n_blocks": NBEATS_N_BLOCKS,
+                    "mlp_units": NBEATS_MLP_UNITS
                 })
             
             # Initialize W&B run
@@ -533,6 +550,8 @@ if __name__ == "__main__":
             
             print(f"Training NBEATS with input_size={SEQ_LENGTH}, horizon={horizon}")
             
+            wb_callback = WandBLoggingCallback(wandb_run)
+
             # Initialize model
             models = [
                 NBEATS(
@@ -540,18 +559,25 @@ if __name__ == "__main__":
                     h=horizon,
                     max_steps=500,
                     scaler_type='robust',
-                    random_seed=42, 
+                    random_seed=PYTORCH_SEED, 
+                    n_harmonics=NBEATS_N_HARMONICS,
+                    n_basis=NBEATS_N_BASIS,
+                    basis=NBEATS_BASIS,
+                    n_blocks=NBEATS_N_BLOCKS,
+                    mlp_units=NBEATS_MLP_UNITS,
+                    callbacks=[wb_callback] 
                 )                
             ]
             
             nf = NeuralForecast(models=models, freq='ME')  # ME = Month End
-            
+        
             # Train model
             nf.fit(df=df_train_nf, val_size=horizon)
             
             # Generate predictions
             Y_hat_df = nf.predict().reset_index()
             
+
             # Prepare test data in same format
             df_test_nf = df_test_period.copy()
             df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
@@ -583,160 +609,7 @@ if __name__ == "__main__":
             
             print(f"✓ Generated {len(all_preds)} NBEATS predictions")
         
-        # -----------------------------------------------------------------
-        # NHITS MODEL: Neural Hierarchical Interpolation for Time Series
-        # -----------------------------------------------------------------
-        elif MODEL == 'NHITS':
-            print("\n" + "-"*60)
-            print("NHITS MODEL: Neural Hierarchical Interpolation for Time Series")
-            print("-"*60)
-            
-            from neuralforecast import NeuralForecast
-            from neuralforecast.models import NHITS
-            
-            # Prepare data in neuralforecast format
-            df_train_nf = df_train.copy()
-            df_train_nf = df_train_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Get test period data
-            df_test_period = df_full[
-                (df_full['Date'] >= fold_config['test_start']) & 
-                (df_full['Date'] <= fold_config['test_end'])
-            ].copy()
-            
-            # Calculate horizon
-            horizon = len(df_test_period['Date'].unique())
-            
-            print(f"Training NHITS with input_size={SEQ_LENGTH}, horizon={horizon}")
-            
-            # Initialize model
-            models = [
-                NHITS(
-                    input_size=SEQ_LENGTH,
-                    h=horizon,
-                    max_steps=500,
-                    scaler_type='robust',
-                    random_seed=42
-                )
-            ]
-            
-            nf = NeuralForecast(models=models, freq='MS')
-            
-            # Train model
-            nf.fit(df=df_train_nf, val_size=horizon)
-            
-            # Generate predictions
-            Y_hat_df = nf.predict().reset_index()
-            
-            # Prepare test data
-            df_test_nf = df_test_period.copy()
-            df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_test_nf = df_test_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Merge predictions with actuals
-            df_results = pd.merge(df_test_nf, Y_hat_df, on=['unique_id', 'ds'], how='left')
-            
-            # Extract predictions and actuals
-            predictions_dict = {}
-            actuals_dict = {}
-            
-            for ts_key in df_results['unique_id'].unique():
-                ts_data = df_results[df_results['unique_id'] == ts_key].sort_values('ds')
-                preds = ts_data['NHITS'].values
-                acts = ts_data['y'].values
-                
-                # Replace negative predictions with 0
-                preds = np.maximum(preds, 0)
-                
-                # Handle NaN predictions
-                preds = np.nan_to_num(preds, nan=0.0)
-                
-                predictions_dict[ts_key] = preds
-                actuals_dict[ts_key] = acts
-            
-            all_preds = np.concatenate([v for v in predictions_dict.values()])
-            all_acts = np.concatenate([v for v in actuals_dict.values()])
-            
-            print(f"✓ Generated {len(all_preds)} NHITS predictions")
-        
-        # -----------------------------------------------------------------
-        # KAN MODEL: Kolmogorov-Arnold Networks
-        # -----------------------------------------------------------------
-        elif MODEL == 'KAN':
-            print("\n" + "-"*60)
-            print("KAN MODEL: Kolmogorov-Arnold Networks")
-            print("-"*60)
-            
-            from neuralforecast import NeuralForecast
-            from neuralforecast.models import KAN
-            
-            # Prepare data in neuralforecast format
-            df_train_nf = df_train.copy()
-            df_train_nf = df_train_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Get test period data
-            df_test_period = df_full[
-                (df_full['Date'] >= fold_config['test_start']) & 
-                (df_full['Date'] <= fold_config['test_end'])
-            ].copy()
-            
-            # Calculate horizon
-            horizon = len(df_test_period['Date'].unique())
-            
-            print(f"Training KAN with input_size={SEQ_LENGTH}, horizon={horizon}")
-            
-            # Initialize model
-            models = [
-                KAN(
-                    input_size=SEQ_LENGTH,
-                    h=horizon,
-                    max_steps=500,
-                    scaler_type='robust',
-                    random_seed=42
-                )
-            ]
-            
-            nf = NeuralForecast(models=models, freq='MS')
-            
-            # Train model
-            nf.fit(df=df_train_nf, val_size=horizon)
-            
-            # Generate predictions
-            Y_hat_df = nf.predict().reset_index()
-            
-            # Prepare test data
-            df_test_nf = df_test_period.copy()
-            df_test_nf = df_test_nf.rename(columns={'ts_key': 'unique_id', 'Date': 'ds', 'Value': 'y'})
-            df_test_nf = df_test_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-            
-            # Merge predictions with actuals
-            df_results = pd.merge(df_test_nf, Y_hat_df, on=['unique_id', 'ds'], how='left')
-            
-            # Extract predictions and actuals
-            predictions_dict = {}
-            actuals_dict = {}
-            
-            for ts_key in df_results['unique_id'].unique():
-                ts_data = df_results[df_results['unique_id'] == ts_key].sort_values('ds')
-                preds = ts_data['KAN'].values
-                acts = ts_data['y'].values
-                
-                # Replace negative predictions with 0
-                preds = np.maximum(preds, 0)
-                
-                # Handle NaN predictions
-                preds = np.nan_to_num(preds, nan=0.0)
-                
-                predictions_dict[ts_key] = preds
-                actuals_dict[ts_key] = acts
-            
-            all_preds = np.concatenate([v for v in predictions_dict.values()])
-            all_acts = np.concatenate([v for v in actuals_dict.values()])
-            
-            print(f"✓ Generated {len(all_preds)} KAN predictions")
-            
+   
         else:
             # -----------------------------------------------------------------
             # STEP 1: Create VECTORIZED datasets with EXOGENOUS features for model development
@@ -1074,13 +947,10 @@ if __name__ == "__main__":
                 })
         
         # Save model checkpoint (skip for baseline and neuralforecast models)
-        if MODEL not in ['BASELINE', 'NBEATS', 'NHITS', 'KAN']:
+        if MODEL not in ['BASELINE', 'NBEATS']:
             torch.save({
                 'model_state_dict': best_model_state,
                 'input_size': INPUT_SIZE,
-                'hidden_size': 64,
-                'num_layers': 2,
-                'dropout': 0.2,
                 'scaler_X': scaler_X,
                 'scaler_y': scaler_y,
                 'n_series': n_series,  # Updated from n_ts_keys to n_series for vectorized dataset

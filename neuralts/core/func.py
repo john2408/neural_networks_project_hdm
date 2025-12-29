@@ -2123,3 +2123,33 @@ def train_with_early_stopping_vectorized(model, train_loader, val_loader, device
             break
     
     return best_val_loss, best_model_state
+
+from pytorch_lightning.callbacks import Callback
+
+class WandBLoggingCallback(Callback):
+    """Custom callback to log training metrics to W&B"""
+    def __init__(self, wandb_run):
+        super().__init__()
+        self.wandb_run = wandb_run
+        self.epoch = 0
+    
+    def on_train_epoch_end(self, trainer, pl_module):
+        """Log metrics at the end of each training epoch"""
+        self.epoch += 1
+        metrics = trainer.callback_metrics
+        
+        log_dict = {"epoch": self.epoch}
+        
+        # Extract train and validation losses
+        if 'train_loss' in metrics:
+            log_dict['train_loss'] = float(metrics['train_loss'])
+        if 'val_loss' in metrics:
+            log_dict['val_loss'] = float(metrics['val_loss'])
+        
+        # Log any other available metrics
+        for key, value in metrics.items():
+            if key not in ['train_loss', 'val_loss']:
+                log_dict[key] = float(value)
+        
+        if self.wandb_run is not None:
+            self.wandb_run.log(log_dict)

@@ -7,6 +7,8 @@ data/
 report/_build/
 models/
 lightning_logs/
+wandb/
+wandb/latest-run/
 
 # C extensions
 *.so

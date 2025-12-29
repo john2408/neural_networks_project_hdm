@@ -28,8 +28,8 @@ if __name__ == "__main__":
     # TRAINING PARAMETERS
     # ========================================================================
     
-    MODEL = 'NBEATS'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NBEATSx'
-    EXOG = False  # Use exogenous features
+    MODEL = 'NBEATSx'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE', 'NBEATS', 'NBEATSx'
+    EXOG = True  # Use exogenous features
 
     ENTITY_NAME = "tensor-torres"  
     PROJECT_NAME = "neuralnetworks-timeseries-multivariate" 

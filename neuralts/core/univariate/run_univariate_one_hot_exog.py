@@ -5,20 +5,16 @@ import numpy as np
 import pandas as pd
 import warnings
 import time
-import os
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 
-from neuralts.core.models import (MLPMultivariate, LSTMForecasterMultivariate,
-                                   RNNForecasterMultivariate, GRUForecasterMultivariate,
-                                   CNN1DForecasterMultivariate, TransformerForecasterMultivariate)
+from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster, 
+                            CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
-from neuralts.core.func import TimeSeriesDatasetFlattened, train_epoch, evaluate
-
+from neuralts.core.func import TimeSeriesDataset, generate_out_of_sample_predictions, train_epoch, evaluate
+import os
+import wandb
 
 warnings.filterwarnings('ignore')
-
-
-
 
 if __name__ == "__main__":
 
@@ -27,15 +23,17 @@ if __name__ == "__main__":
     # TRAINING PARAMETERS
     # ========================================================================
 
-    MODEL = 'RNNMultivariate'  # Options: 'BASELINE', 'MLPMultivariate', 'LSTMMultivariate', 'RNNMultivariate', 'GRUMultivariate', 'CNN1DMultivariate', 'TransformerMultivariate'
- 
-    PYTORCH_SEED = 42
+    MODE = "UNI"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
+    MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
+    ENTITY_NAME = "tensor-torres"
+    PROJECT_NAME = "neuralnetworks-timeseries"
 
+    PYTORCH_SEED = 42
     SEQ_LENGTH = 6
     TRAIN_RATIO = 0.8
     EMBARGO = 1
     EPOCHS = 25
-    BATCH_SIZE = 8  # Smaller batch for flattened approach
+    BATCH_SIZE = 64
     LEARNING_RATE = 0.001
     WEIGHT_DECAY = 1e-5
 
@@ -66,23 +64,28 @@ if __name__ == "__main__":
     TRANSFORMER_DROPOUT = 0.2
 
     # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
-    #     
     OPTIMIZE_HYPERPARAMETERS = True  # Set to False to skip optimization
     N_TRIALS = 3  # Number of Optuna trials
-    OPTUNA_TIMEOUT = 3600  # Timeout in seconds (1 hour)
+    OPTUNA_TIMEOUT = 900  # Timeout in seconds (15 minutes)
+
 
     TOTAL_SCRIPT_RUNTIME = None
     TOTAL_TRAINING_TIME_FOLDS = dict()
     TOTAL_OPTIMIZATION_TIME = None
 
-
     GLOBAL_PATH = os.getcwd()
-    OUTPUT_PATH = os.path.join(GLOBAL_PATH, "models", MODEL.lower() + "_exog")
+    OUTPUT_PATH = os.path.join(GLOBAL_PATH, "models", MODEL.lower() + "_" + MODE.lower() + "_one_hot")
     os.makedirs(OUTPUT_PATH, exist_ok=True)
-    df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold_padding.parquet")
-
+    df_path = os.path.join(GLOBAL_PATH, "data", "gold", "monthly_registration_volume_gold.parquet")
 
     # ========================================================================
+
+    torch.manual_seed(PYTORCH_SEED)
+    np.random.seed(PYTORCH_SEED)
+    torch.cuda.manual_seed_all(PYTORCH_SEED)
+    torch.backends.cudnn.deterministic = True # Ensures reproducibility
+    torch.backends.cudnn.benchmark = False # Ensures reproducibility
+
 
     SCRIPT_START_TIME = time.time()
 
@@ -100,16 +103,20 @@ if __name__ == "__main__":
     print(f"Device: {device}")
 
 
-    df_full = pd.read_parquet(df_path, engine='pyarrow')
 
-    cols_to_drop = ["OEM", "Model", "drive_type"]
-    df_full = df_full.drop(columns=cols_to_drop)
+    # Load data
+    df_full = pd.read_parquet(df_path, engine='pyarrow')
 
     date_col = 'Date'
     ts_key_col = 'ts_key'
     value_col = 'Value'
-    features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
     
+    if MODE == "UNI":
+        features = ['sin_month', 'cos_month', 'scaled_year']
+        drop_cols = ['Year', 'Month']
+        df_full = df_full.drop(columns=drop_cols)
+    elif MODE == "EXO":
+        features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
 
     #Validate not NaN or infinite values in features
     assert not df_full[features].isna().any().any(), "NaN values found in features"
@@ -168,11 +175,14 @@ if __name__ == "__main__":
         print(f"  Test period: {fold['test_start']} to {fold['test_end']}")
     
     
-
+    # ========================================================================
+    # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
+    # ========================================================================
     
-    if OPTIMIZE_HYPERPARAMETERS and MODEL != 'BASELINE':
+    best_trial = None
+    if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE']:
         import optuna
-        from neuralts.core.func import create_model_from_trial, train_with_early_stopping
+        from neuralts.core.func import create_univariate_model_from_trial, train_with_early_stopping
         
         print("\n" + "="*80)
         print("HYPERPARAMETER OPTIMIZATION WITH OPTUNA")
@@ -189,7 +199,7 @@ if __name__ == "__main__":
         print(f"  Training observations: {len(df_train):,}")
         
         # Create datasets
-        train_dataset = TimeSeriesDatasetFlattened(
+        train_dataset = TimeSeriesDataset(
             df_train,
             feature_cols=features,
             seq_length=SEQ_LENGTH,
@@ -198,7 +208,7 @@ if __name__ == "__main__":
             train_ratio=TRAIN_RATIO
         )
         
-        val_dataset = TimeSeriesDatasetFlattened(
+        val_dataset = TimeSeriesDataset(
             df_train,
             feature_cols=features,
             seq_length=SEQ_LENGTH,
@@ -209,12 +219,12 @@ if __name__ == "__main__":
             scaler_y=train_dataset.scaler_y
         )
         
-        n_series = train_dataset.n_series
-        n_features_additional = train_dataset.n_features_additional
+        INPUT_SIZE_OPT = train_dataset.X.shape[2]
         
         print(f"\nOptimization dataset:")
         print(f"  Training samples: {len(train_dataset):,}")
         print(f"  Validation samples: {len(val_dataset):,}")
+        print(f"  Input size: {INPUT_SIZE_OPT}")
         
         def objective(trial):
             """
@@ -222,11 +232,11 @@ if __name__ == "__main__":
             """
             # Suggest hyperparameters
             learning_rate = trial.suggest_float('learning_rate', 1e-4, 1e-2, log=True)
-            batch_size = trial.suggest_categorical('batch_size', [4, 8, 16])
+            batch_size = trial.suggest_categorical('batch_size', [32, 64, 128])
             
             # Create model with trial hyperparameters
-            model, hyperparams = create_model_from_trial(
-                MODEL, trial, n_series, n_features_additional, SEQ_LENGTH
+            model, hyperparams = create_univariate_model_from_trial(
+                MODEL, trial, INPUT_SIZE_OPT, SEQ_LENGTH
             )
             model = model.to(device)
             
@@ -269,50 +279,41 @@ if __name__ == "__main__":
         for key, value in best_trial.params.items():
             print(f"    {key}: {value}")
         
-        # Update global parameters with best hyperparameters
-        if MODEL == 'MLPMultivariate':
+        # Update hyperparameters with best trial values
+        BATCH_SIZE = best_trial.params.get('batch_size', BATCH_SIZE)
+        LEARNING_RATE = best_trial.params.get('learning_rate', LEARNING_RATE)
+        
+        if MODEL == 'MLP':
             MLP_LAYERS = best_trial.params.get('num_layers', MLP_LAYERS)
             MLP_HIDDEN_SIZE = best_trial.params.get('hidden_size', MLP_HIDDEN_SIZE)
             MLP_DROPOUT = best_trial.params.get('dropout', MLP_DROPOUT)
-            BATCH_SIZE = best_trial.params.get('batch_size', BATCH_SIZE)
-            LEARNING_RATE = best_trial.params.get('learning_rate', LEARNING_RATE)
         
-        elif MODEL == 'LSTMMultivariate':
+        elif MODEL == 'LSTM':
             LSTM_LAYERS = best_trial.params.get('num_layers', LSTM_LAYERS)
             LSTM_HIDDEN_SIZE = best_trial.params.get('hidden_size', LSTM_HIDDEN_SIZE)
             LSTM_DROPOUT = best_trial.params.get('dropout', LSTM_DROPOUT)
-            BATCH_SIZE = best_trial.params.get('batch_size', BATCH_SIZE)
-            LEARNING_RATE = best_trial.params.get('learning_rate', LEARNING_RATE)
         
-        elif MODEL == 'RNNMultivariate':
+        elif MODEL == 'RNN':
             RNN_LAYERS = best_trial.params.get('num_layers', RNN_LAYERS)
             RNN_HIDDEN_SIZE = best_trial.params.get('hidden_size', RNN_HIDDEN_SIZE)
             RNN_DROPOUT = best_trial.params.get('dropout', RNN_DROPOUT)
-            BATCH_SIZE = best_trial.params.get('batch_size', BATCH_SIZE)
-            LEARNING_RATE = best_trial.params.get('learning_rate', LEARNING_RATE)
         
-        elif MODEL == 'GRUMultivariate':
+        elif MODEL == 'GRU':
             GRU_LAYERS = best_trial.params.get('num_layers', GRU_LAYERS)
             GRU_HIDDEN_SIZE = best_trial.params.get('hidden_size', GRU_HIDDEN_SIZE)
             GRU_DROPOUT = best_trial.params.get('dropout', GRU_DROPOUT)
-            BATCH_SIZE = best_trial.params.get('batch_size', BATCH_SIZE)
-            LEARNING_RATE = best_trial.params.get('learning_rate', LEARNING_RATE)
         
-        elif MODEL == 'CNN1DMultivariate':
+        elif MODEL == 'CNN1D':
             CNN_LAYERS = best_trial.params.get('num_layers', CNN_LAYERS)
             CNN_HIDDEN_SIZE = best_trial.params.get('hidden_size', CNN_HIDDEN_SIZE)
             CNN_DROPOUT = best_trial.params.get('dropout', CNN_DROPOUT)
-            BATCH_SIZE = best_trial.params.get('batch_size', BATCH_SIZE)
-            LEARNING_RATE = best_trial.params.get('learning_rate', LEARNING_RATE)
         
-        elif MODEL == 'TransformerMultivariate':
+        elif MODEL in ['Transformer', 'TransformerCLS']:
             TRANSFORMER_D_MODEL = best_trial.params.get('d_model', TRANSFORMER_D_MODEL)
             TRANSFORMER_NHEAD = best_trial.params.get('nhead', TRANSFORMER_NHEAD)
             TRANSFORMER_LAYERS = best_trial.params.get('num_layers', TRANSFORMER_LAYERS)
             TRANSFORMER_DIM_FEEDFORWARD = best_trial.params.get('dim_feedforward', TRANSFORMER_DIM_FEEDFORWARD)
             TRANSFORMER_DROPOUT = best_trial.params.get('dropout', TRANSFORMER_DROPOUT)
-            BATCH_SIZE = best_trial.params.get('batch_size', BATCH_SIZE)
-            LEARNING_RATE = best_trial.params.get('learning_rate', LEARNING_RATE)
         
         print(f"\n✓ Hyperparameters updated with best trial values")
         print(f"  Learning rate: {LEARNING_RATE:.6f}")
@@ -335,8 +336,6 @@ if __name__ == "__main__":
                 f.write(f"  {key}: {value}\n")
         print(f"✓ Saved best hyperparameters to: {best_params_path}")
     
-    elif MODEL == 'BASELINE':
-        print("\n⚠ Skipping hyperparameter optimization for BASELINE model")
     else:
         print("\n⚠ Hyperparameter optimization disabled (OPTIMIZE_HYPERPARAMETERS=False)")
     
@@ -358,6 +357,77 @@ if __name__ == "__main__":
         print("\n" + "="*80)
         print(f"{fold_config['name'].upper()}: {fold_config['test_start']} to {fold_config['test_end']}")
         print("="*80)
+        
+        # Initialize W&B for this fold (skip for BASELINE model)
+        wandb_run = None
+        if MODEL not in ['BASELINE']:
+            # Prepare config based on model type
+            wandb_config = {
+                "model": MODEL,
+                "mode": MODE,
+                "fold": fold_config['name'],
+                "seq_length": SEQ_LENGTH,
+                "embargo": EMBARGO,
+                "train_ratio": TRAIN_RATIO,
+                "epochs": EPOCHS,
+                "batch_size": BATCH_SIZE,
+                "learning_rate": LEARNING_RATE,
+                "weight_decay": WEIGHT_DECAY,
+                "n_features": len(features) if MODE == "UNI" else "all",
+                "train_end": fold_config['train_end'],
+                "test_start": fold_config['test_start'],
+                "test_end": fold_config['test_end']
+            }
+            
+            # Add model-specific hyperparameters
+            if MODEL == 'MLP':
+                wandb_config.update({
+                    "num_layers": MLP_LAYERS,
+                    "hidden_size": MLP_HIDDEN_SIZE,
+                    "dropout": MLP_DROPOUT
+                })
+            elif MODEL == 'LSTM':
+                wandb_config.update({
+                    "num_layers": LSTM_LAYERS,
+                    "hidden_size": LSTM_HIDDEN_SIZE,
+                    "dropout": LSTM_DROPOUT
+                })
+            elif MODEL == 'RNN':
+                wandb_config.update({
+                    "num_layers": RNN_LAYERS,
+                    "hidden_size": RNN_HIDDEN_SIZE,
+                    "dropout": RNN_DROPOUT
+                })
+            elif MODEL == 'GRU':
+                wandb_config.update({
+                    "num_layers": GRU_LAYERS,
+                    "hidden_size": GRU_HIDDEN_SIZE,
+                    "dropout": GRU_DROPOUT
+                })
+            elif MODEL == 'CNN1D':
+                wandb_config.update({
+                    "num_layers": CNN_LAYERS,
+                    "hidden_size": CNN_HIDDEN_SIZE,
+                    "dropout": CNN_DROPOUT
+                })
+            elif MODEL in ['Transformer', 'TransformerCLS']:
+                wandb_config.update({
+                    "d_model": TRANSFORMER_D_MODEL,
+                    "nhead": TRANSFORMER_NHEAD,
+                    "num_layers": TRANSFORMER_LAYERS,
+                    "dim_feedforward": TRANSFORMER_DIM_FEEDFORWARD,
+                    "dropout": TRANSFORMER_DROPOUT
+                })
+            
+            # Initialize W&B run
+            wandb_run = wandb.init(
+                entity=ENTITY_NAME,
+                project=PROJECT_NAME,
+                name=f"{MODEL}__{MODE}_ONE_HOT__{fold_config['name'].replace(' ', '_')}",
+                config=wandb_config,
+                reinit=True  # Allow multiple runs in same script
+            )
+            print(f"\n✓ Initialized W&B run: {wandb_run.name}")
         
         # Filter training data up to train_end date
         df_train = df_full[df_full['Date'] <= fold_config['train_end']].copy()
@@ -422,16 +492,16 @@ if __name__ == "__main__":
             all_acts = np.array(all_acts)
             
             print(f"✓ Generated {len(all_preds)} baseline predictions")
-            
+         
         else:
             # -----------------------------------------------------------------
-            # STEP 1: Create FLATTENED datasets for model development
+            # STEP 1: Create datasets for model development (train/val split)
             # -----------------------------------------------------------------
             print("\n" + "-"*60)
-            print("STEP 1: Creating FLATTENED datasets for model development")
+            print("STEP 1: Creating datasets for model development")
             print("-"*60)
-            
-            train_dataset = TimeSeriesDatasetFlattened(
+        
+            train_dataset = TimeSeriesDataset(
                 df_train,
                 feature_cols=features, 
                 seq_length=SEQ_LENGTH,
@@ -445,11 +515,10 @@ if __name__ == "__main__":
             # Save scalers and metadata
             scaler_X = train_dataset.scaler_X
             scaler_y = train_dataset.scaler_y
-            n_series = train_dataset.n_series
-            n_features_additional = train_dataset.n_features_additional
+            n_ts_keys = train_dataset.n_ts_keys
             ts_key_to_idx = train_dataset.ts_key_to_idx
             
-            test_dataset = TimeSeriesDatasetFlattened(
+            test_dataset = TimeSeriesDataset(
                 df_train,
                 feature_cols=features,
                 seq_length=SEQ_LENGTH,
@@ -461,96 +530,74 @@ if __name__ == "__main__":
             )
             
             print(f"Validation samples: {len(test_dataset):,}")
-            
-            # -----------------------------------------------------------------
-            # STEP 2: Initialize and train model
-            # -----------------------------------------------------------------
+        
+        # -----------------------------------------------------------------
+        # STEP 2: Initialize and train model
+        # -----------------------------------------------------------------
             print("\n" + "-"*60)
             print(f"STEP 2: Training {MODEL} model")
             print("-"*60)
             
-            if MODEL == 'MLPMultivariate':
-                model = MLPMultivariate(
-                    input_size=SEQ_LENGTH,
-                    n_series=n_series,
-                    n_features_additional=n_features_additional,
-                    num_layers=MLP_LAYERS,
-                    hidden_size=MLP_HIDDEN_SIZE,
-                    dropout=MLP_DROPOUT
-                ).to(device)
-                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-                print(f"Input dimension: {model.input_dim}")
-                print(f"Output dimension: {n_series} (all series)")
+            INPUT_SIZE = train_dataset.X.shape[2]
             
-            elif MODEL == 'LSTMMultivariate':
-                model = LSTMForecasterMultivariate(
-                    input_size=SEQ_LENGTH,
-                    n_series=n_series,
-                    n_features_additional=n_features_additional,
+            if MODEL == 'LSTM':
+                model = LSTMForecaster(
+                    input_size=INPUT_SIZE,
                     hidden_size=LSTM_HIDDEN_SIZE,
                     num_layers=LSTM_LAYERS,
                     dropout=LSTM_DROPOUT
                 ).to(device)
-                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-                print(f"Features per timestep: {model.features_per_timestep}")
-                print(f"Output dimension: {n_series} (all series)")
-            
-            elif MODEL == 'RNNMultivariate':
-                model = RNNForecasterMultivariate(
-                    input_size=SEQ_LENGTH,
-                    n_series=n_series,
-                    n_features_additional=n_features_additional,
+            elif MODEL == 'RNN':
+                model = RNNForecaster(
+                    input_size=INPUT_SIZE,
                     hidden_size=RNN_HIDDEN_SIZE,
                     num_layers=RNN_LAYERS,
                     dropout=RNN_DROPOUT
                 ).to(device)
-                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-                print(f"Features per timestep: {model.features_per_timestep}")
-                print(f"Output dimension: {n_series} (all series)")
-            
-            elif MODEL == 'GRUMultivariate':
-                model = GRUForecasterMultivariate(
-                    input_size=SEQ_LENGTH,
-                    n_series=n_series,
-                    n_features_additional=n_features_additional,
+            elif MODEL == 'GRU':
+                model = GRUForecaster(
+                    input_size=INPUT_SIZE,
                     hidden_size=GRU_HIDDEN_SIZE,
                     num_layers=GRU_LAYERS,
                     dropout=GRU_DROPOUT
                 ).to(device)
-                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-                print(f"Features per timestep: {model.features_per_timestep}")
-                print(f"Output dimension: {n_series} (all series)")
-            
-            elif MODEL == 'CNN1DMultivariate':
-                model = CNN1DForecasterMultivariate(
-                    input_size=SEQ_LENGTH,
-                    n_series=n_series,
-                    n_features_additional=n_features_additional,
+            elif MODEL == 'CNN1D':
+                model = CNN1DForecaster(
+                    input_size=INPUT_SIZE,
                     hidden_size=CNN_HIDDEN_SIZE,
                     num_layers=CNN_LAYERS,
                     dropout=CNN_DROPOUT
                 ).to(device)
-                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-                print(f"Features per timestep: {model.features_per_timestep}")
-                print(f"Output dimension: {n_series} (all series)")
-            
-            elif MODEL == 'TransformerMultivariate':
-                model = TransformerForecasterMultivariate(
-                    input_size=SEQ_LENGTH,
-                    n_series=n_series,
-                    n_features_additional=n_features_additional,
+            elif MODEL == 'MLP':
+                model = MLPForecaster(
+                    input_size=INPUT_SIZE,
+                    seq_length=SEQ_LENGTH,
+                    hidden_size=MLP_HIDDEN_SIZE,
+                    num_layers=MLP_LAYERS,
+                    dropout=MLP_DROPOUT
+                ).to(device)
+            elif MODEL == 'Transformer':
+                model = TransformerForecaster(
+                    input_size=INPUT_SIZE,
                     d_model=TRANSFORMER_D_MODEL,
                     nhead=TRANSFORMER_NHEAD,
                     num_layers=TRANSFORMER_LAYERS,
                     dim_feedforward=TRANSFORMER_DIM_FEEDFORWARD,
                     dropout=TRANSFORMER_DROPOUT
                 ).to(device)
-                print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-                print(f"Features per timestep: {model.features_per_timestep}")
-                print(f"Output dimension: {n_series} (all series)")
-            
+            elif MODEL == 'TransformerCLS':
+                model = TransformerForecasterCLS(
+                    input_size=INPUT_SIZE,
+                    d_model=TRANSFORMER_D_MODEL,
+                    nhead=TRANSFORMER_NHEAD,
+                    num_layers=TRANSFORMER_LAYERS,
+                    dim_feedforward=TRANSFORMER_DIM_FEEDFORWARD,
+                    dropout=TRANSFORMER_DROPOUT
+                ).to(device)
             else:
-                raise ValueError(f"Unknown model: {MODEL}")
+                raise ValueError(f"Unsupported MODEL type: {MODEL}")
+        
+            print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
             
             train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
             val_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
@@ -574,6 +621,15 @@ if __name__ == "__main__":
                 
                 scheduler.step(val_loss)
                 
+                # Log metrics to W&B
+                if wandb_run is not None:
+                    wandb_run.log({
+                        "epoch": epoch + 1,
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "learning_rate": optimizer.param_groups[0]['lr']
+                    })
+                
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     best_model_state = model.state_dict().copy()
@@ -584,142 +640,41 @@ if __name__ == "__main__":
             
             # Load best model
             model.load_state_dict(best_model_state)
-            
+
             training_time = time.time() - start_time  # in seconds
 
             TOTAL_TRAINING_TIME_FOLDS[fold_config['name']] = training_time
-                        
-            print(f"\nTraining completed in {training_time:.1f}s")
+            
+            print(f"\nTraining completed in {training_time:.1f} seconds")
             print(f"Best validation loss: {best_val_loss:.6f}")
             
 
             # -----------------------------------------------------------------
             # STEP 3: Out-of-sample predictions on test period
             # -----------------------------------------------------------------
-            print("\n" + "-"*60)
-            print(f"STEP 3: Out-of-sample predictions ({MODEL})")
-            print("-"*60)
-            
+
             # Get test period data
             df_test_period = df_full[
                 (df_full['Date'] >= fold_config['test_start']) & 
                 (df_full['Date'] <= fold_config['test_end'])
             ].copy()
-            
-            # For MLPMultivariate, we need to predict all series at once
-            # Build prediction data similar to the dataset
-            test_start_date = pd.to_datetime(fold_config['test_start'])
-            lookback_start = test_start_date - pd.DateOffset(months=SEQ_LENGTH + EMBARGO)
-            
-            df_for_prediction = df_full[
-                (df_full['Date'] >= lookback_start) & 
-                (df_full['Date'] <= fold_config['test_end'])
-            ].copy()
-            
-            # Pivot data
-            df_pivot = df_for_prediction.pivot_table(
-                index='Date',
-                columns='ts_key',
-                values='Value',
-                aggfunc='first'
-            ).sort_index()
-            
-            df_features_pivot = {}
-            if n_features_additional > 0:
-                for feat in features:
-                    df_features_pivot[feat] = df_for_prediction.pivot_table(
-                        index='Date',
-                        columns='ts_key',
-                        values=feat,
-                        aggfunc='first'
-                    ).sort_index()
-            
-            dates = pd.to_datetime(df_pivot.index)
-            values_matrix = df_pivot.values
-            
-            # Find test start index
-            test_start_idx = np.where(dates >= test_start_date)[0][0]
-            
-            # Autoregressive prediction
-            predictions_dict = {ts_key: [] for ts_key in ts_key_to_idx.keys()}
-            actuals_dict = {ts_key: [] for ts_key in ts_key_to_idx.keys()}
-            
-            model.eval()
-            n_continuous = n_series * (1 + n_features_additional)
-            
-            # Initialize history with data up to test_start
-            history_values = values_matrix[:test_start_idx].copy()
-            if n_features_additional > 0:
-                history_features = {feat: df_features_pivot[feat].iloc[:test_start_idx].values.copy()
-                                   for feat in features}
-            
-            n_test_steps = len(dates) - test_start_idx
-            print(f"Generating {n_test_steps} predictions...")
-            
-            for step in range(n_test_steps):
-                current_idx = test_start_idx + step
-                
-                # Build input sequence
-                if len(history_values) < SEQ_LENGTH + EMBARGO:
-                    continue
-                
-                sequence = []
-                for t in range(SEQ_LENGTH):
-                    hist_idx = len(history_values) - SEQ_LENGTH - EMBARGO + t
-                    
-                    timestep_features = []
-                    # All series values
-                    timestep_features.extend(history_values[hist_idx, :])
-                    
-                    # All series features
-                    if n_features_additional > 0:
-                        for feat in features:
-                            timestep_features.extend(history_features[feat][hist_idx, :])
-                    
-                    # Temporal features
-                    date = dates[current_idx - SEQ_LENGTH - EMBARGO + t]
-                    timestep_features.extend([date.year, date.month])
-                    
-                    sequence.append(timestep_features)
-                
-                # Prepare input
-                sequence_array = np.array([sequence], dtype=np.float32)
-                
-                # Scale
-                seq_continuous = sequence_array[:, :, :n_continuous]
-                seq_temporal = sequence_array[:, :, n_continuous:]
-                
-                batch_size, seq_len, n_cont = seq_continuous.shape
-                seq_continuous_flat = seq_continuous.reshape(-1, n_cont)
-                seq_continuous_scaled = scaler_X.transform(seq_continuous_flat)
-                seq_continuous_scaled = seq_continuous_scaled.reshape(batch_size, seq_len, n_cont)
-                
-                sequence_scaled = np.concatenate([seq_continuous_scaled, seq_temporal], axis=2)
-                
-                # Predict
-                with torch.no_grad():
-                    X_batch = torch.FloatTensor(sequence_scaled).to(device)
-                    pred_scaled = model(X_batch).cpu().numpy()  # (1, n_series)
-                    pred_values = scaler_y.inverse_transform(pred_scaled)[0]  # (n_series,)
-                
-                # Store predictions
-                actual_values = values_matrix[current_idx, :]
-                for ts_key, idx in ts_key_to_idx.items():
-                    predictions_dict[ts_key].append(pred_values[idx])
-                    actuals_dict[ts_key].append(actual_values[idx])
-                
-                # Update history with ACTUAL values (teacher forcing)
-                history_values = np.vstack([history_values, actual_values])
-                if n_features_additional > 0:
-                    for feat in features:
-                        new_feat = df_features_pivot[feat].iloc[current_idx].values
-                        history_features[feat] = np.vstack([history_features[feat], new_feat])
-            
-            all_preds = np.concatenate([np.array(v) for v in predictions_dict.values()])
-            all_acts = np.concatenate([np.array(v) for v in actuals_dict.values()])
-            
-            print(f"✓ Generated predictions for {len(predictions_dict)} time series")
-            print(f"  Total predictions: {len(all_preds):,}")
+
+
+            predictions_dict, actuals_dict, all_preds, all_acts = generate_out_of_sample_predictions(model=model,
+                df_test_period=df_test_period,
+                df_full=df_full,
+                fold_config=fold_config,
+                features=features,
+                scaler_X=scaler_X,
+                scaler_y=scaler_y,
+                ts_key_to_idx=ts_key_to_idx,
+                n_ts_keys=n_ts_keys,
+                seq_length=SEQ_LENGTH,
+                embargo=EMBARGO,
+                device=device
+            )
+
+
         # -----------------------------------------------------------------
         # Create predictions DataFrame and save as CSV
         # -----------------------------------------------------------------
@@ -809,83 +764,42 @@ if __name__ == "__main__":
         print(f"  R²:    {r2:.4f}")
         print(f"  SMAPE: {smape_score:.2f}%")
         
-        # Save model checkpoint (skip for baseline)
-        if MODEL != 'BASELINE':
-            checkpoint_data = {
+        # Log final test metrics to W&B
+        if wandb_run is not None:
+            wandb_run.log({
+                "test_mse": mse,
+                "test_rmse": rmse,
+                "test_mae": mae,
+                "test_r2": r2,
+                "test_smape": smape_score
+            })
+            
+            # Log SMAPE distribution
+            for cat in category_order:
+                wandb_run.log({
+                    f"smape_dist_{cat}_count": category_distribution[cat]['count'],
+                    f"smape_dist_{cat}_pct": category_distribution[cat]['percentage']
+                })
+        
+        # Save model checkpoint
+        if MODEL not in ['BASELINE']:
+            torch.save({
                 'model_state_dict': best_model_state,
+                'input_size': INPUT_SIZE,
+                'hidden_size': 64,
+                'num_layers': 2,
+                'dropout': 0.2,
                 'scaler_X': scaler_X,
                 'scaler_y': scaler_y,
+                'n_ts_keys': n_ts_keys,
+                'ts_key_to_idx': ts_key_to_idx,
                 'seq_length': SEQ_LENGTH,
                 'fold_config': fold_config,
                 'metrics': fold_metrics[-1]
-            }
-            
-            if MODEL == 'MLPMultivariate':
-                checkpoint_data.update({
-                    'input_size': SEQ_LENGTH,
-                    'n_series': n_series,
-                    'n_features_additional': n_features_additional,
-                    'num_layers': MLP_LAYERS,
-                    'hidden_size': MLP_HIDDEN_SIZE,
-                    'ts_key_to_idx': ts_key_to_idx
-                })
-            
-            elif MODEL == 'LSTMMultivariate':
-                checkpoint_data.update({
-                    'input_size': SEQ_LENGTH,
-                    'n_series': n_series,
-                    'n_features_additional': n_features_additional,
-                    'num_layers': LSTM_LAYERS,
-                    'hidden_size': LSTM_HIDDEN_SIZE,
-                    'ts_key_to_idx': ts_key_to_idx
-                })
-            
-            elif MODEL == 'RNNMultivariate':
-                checkpoint_data.update({
-                    'input_size': SEQ_LENGTH,
-                    'n_series': n_series,
-                    'n_features_additional': n_features_additional,
-                    'num_layers': RNN_LAYERS,
-                    'hidden_size': RNN_HIDDEN_SIZE,
-                    'ts_key_to_idx': ts_key_to_idx
-                })
-            
-            elif MODEL == 'GRUMultivariate':
-                checkpoint_data.update({
-                    'input_size': SEQ_LENGTH,
-                    'n_series': n_series,
-                    'n_features_additional': n_features_additional,
-                    'num_layers': GRU_LAYERS,
-                    'hidden_size': GRU_HIDDEN_SIZE,
-                    'ts_key_to_idx': ts_key_to_idx
-                })
-            
-            elif MODEL == 'CNN1DMultivariate':
-                checkpoint_data.update({
-                    'input_size': SEQ_LENGTH,
-                    'n_series': n_series,
-                    'n_features_additional': n_features_additional,
-                    'num_layers': CNN_LAYERS,
-                    'hidden_size': CNN_HIDDEN_SIZE,
-                    'ts_key_to_idx': ts_key_to_idx
-                })
-            
-            elif MODEL == 'TransformerMultivariate':
-                checkpoint_data.update({
-                    'input_size': SEQ_LENGTH,
-                    'n_series': n_series,
-                    'n_features_additional': n_features_additional,
-                    'd_model': TRANSFORMER_D_MODEL,
-                    'nhead': TRANSFORMER_NHEAD,
-                    'num_layers': TRANSFORMER_LAYERS,
-                    'dim_feedforward': TRANSFORMER_DIM_FEEDFORWARD,
-                    'ts_key_to_idx': ts_key_to_idx
-                })
-            
-            torch.save(checkpoint_data, os.path.join(fold_output_dir, 'model_checkpoint.pth'))
+            }, os.path.join(fold_output_dir, 'model_checkpoint.pth'))
         
-        # Visualization (skip for baseline)
-        if MODEL != 'BASELINE':
+        # Visualization
+        if MODEL not in ['BASELINE']:
             fig, axes = plt.subplots(1, 2, figsize=(15, 6))
             
             # Training history
@@ -928,6 +842,11 @@ if __name__ == "__main__":
         plt.tight_layout()
         plt.savefig(os.path.join(fold_output_dir, 'predictions_vs_actuals.png'), dpi=300, bbox_inches='tight')
         plt.close()
+        
+        # Finish W&B run for this fold
+        if wandb_run is not None:
+            wandb_run.finish()
+            print(f"✓ Finished W&B run for {fold_config['name']}")
         
         print(f"\n✓ Saved fold results to: {fold_output_dir}")
 
@@ -1010,7 +929,6 @@ if __name__ == "__main__":
     TOTAL_SCRIPT_RUNTIME = (time.time() - SCRIPT_START_TIME) / 60.0  # in minutes
     print(f"\nTotal script runtime: {TOTAL_SCRIPT_RUNTIME:.1f} minutes")
     
-
     # ========================================================================
     # SAVE COMPREHENSIVE RESULTS TO TXT FILE
     # ========================================================================
@@ -1021,7 +939,7 @@ if __name__ == "__main__":
         f.write("="*80 + "\n")
         f.write(f"{MODEL} MODEL - FINAL EVALUATION RESULTS\n")
         f.write("="*80 + "\n\n")
-    
+
         f.write(f"Model: {MODEL}\n")
         if best_trial is not None:
             f.write("Best Hyperparameters:\n")
@@ -1046,6 +964,7 @@ if __name__ == "__main__":
         f.write("="*80 + "\n")
         f.write("1. FINAL RESULTS: AVERAGE METRICS ACROSS ALL FOLDS\n")
         f.write("="*80 + "\n\n")
+        
         
         f.write("Per-Fold Metrics:\n")
         f.write(metrics_df.to_string(index=False) + "\n\n")

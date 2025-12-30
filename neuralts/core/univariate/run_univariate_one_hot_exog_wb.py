@@ -112,7 +112,7 @@ if __name__ == "__main__":
     value_col = 'Value'
     
     if MODE == "UNI":
-        features = ['Year', 'Month']
+        features = []
     elif MODE == "EXO":
         features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
 
@@ -180,7 +180,7 @@ if __name__ == "__main__":
     best_trial = None
     if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE']:
         import optuna
-        from neuralts.core.func import create_univariate_model_from_trial, train_with_early_stopping
+        from neuralts.core.func import create_model_from_trial, train_with_early_stopping
         
         print("\n" + "="*80)
         print("HYPERPARAMETER OPTIMIZATION WITH OPTUNA")
@@ -233,7 +233,7 @@ if __name__ == "__main__":
             batch_size = trial.suggest_categorical('batch_size', [32, 64, 128])
             
             # Create model with trial hyperparameters
-            model, hyperparams = create_univariate_model_from_trial(
+            model, hyperparams = create_model_from_trial(
                 MODEL, trial, INPUT_SIZE_OPT, SEQ_LENGTH
             )
             model = model.to(device)

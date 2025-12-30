@@ -255,6 +255,7 @@ class CNN1DForecaster(nn.Module):
         return out
 
 
+
 class MLPForecaster(nn.Module):
     """
     MLP model for UNIVARIATE time series forecasting with one-hot encoding.

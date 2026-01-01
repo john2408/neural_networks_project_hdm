@@ -312,13 +312,20 @@ if __name__ == "__main__":
                     
                     nf = NeuralForecast(models=[nf_model], freq='ME')
                     nf.fit(df=df_train_nf, val_size=val_size)
+
+                                        # Get validation loss from trainer callback metrics
+                    if hasattr(nf.models[0], 'metrics'):
+                        best_val_loss = nf.models[0].metrics.get('valid_loss', float('inf'))
+                    else:
+                        raise RuntimeError("Trainer or callback_metrics not found in NeuralForecast model.")
+                        #best_val_loss = float('inf')
+                    
+                    return best_val_loss
                     
                 elif MODEL == 'NBEATSx':
-                    if EXOG:
-                        df_train_nf = df_train_nf[['unique_id', 'ds', 'y'] + exog_columns].sort_values(['unique_id', 'ds'])
-                    else:
-                        df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-                    
+                    assert EXOG, "Exogenous features must be enabled for NBEATSx model."
+                    df_train_nf = df_train_nf[['unique_id', 'ds', 'y'] + exog_columns].sort_values(['unique_id', 'ds'])
+
                     # Create static dataframe with one-hot encoded series IDs
                     unique_ids = df_train_nf['unique_id'].unique()
                     static_df = pd.DataFrame({'unique_id': unique_ids})

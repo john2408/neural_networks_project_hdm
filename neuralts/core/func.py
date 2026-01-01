@@ -1975,7 +1975,7 @@ def create_model_from_trial(model_type, trial, input_size, seq_length):
         
         # Suggest hyperparameters
         dropout = trial.suggest_float('dropout_prob_theta', 0.0, 0.7)
-        max_steps = trial.suggest_categorical('max_steps', [200, 300, 500, 700])
+        max_steps = trial.suggest_categorical('max_steps', [50, 100, 200, 300, 500])
         n_harmonics = trial.suggest_int('n_harmonics', 1, 4)
         n_basis = trial.suggest_int('n_polynomials', 1, 4)
         n_blocks = trial.suggest_categorical('n_blocks', [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
@@ -2001,7 +2001,7 @@ def create_model_from_trial(model_type, trial, input_size, seq_length):
         
         # Suggest hyperparameters
         dropout = trial.suggest_float('dropout_prob_theta', 0.0, 0.7)
-        max_steps = trial.suggest_categorical('max_steps', [200, 300, 500, 700])
+        max_steps = trial.suggest_categorical('max_steps', [50, 100, 200, 300, 500])
         n_harmonics = trial.suggest_int('n_harmonics', 1, 4)
         n_basis = trial.suggest_int('n_polynomials', 1, 4)
         basis = trial.suggest_categorical('basis', ['polynomial'])

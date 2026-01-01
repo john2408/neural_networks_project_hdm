@@ -2208,3 +2208,37 @@ class WandBLoggingCallback(Callback):
         
         if self.wandb_run is not None:
             self.wandb_run.log(log_dict)
+
+class MetricsLoggingCallback(Callback):
+    """Custom callback to track training metrics without W&B"""
+    def __init__(self):
+        super().__init__()
+        self.epoch = 0
+        self.metrics_history = []
+    
+    def on_train_epoch_end(self, trainer, pl_module):
+        """Track metrics at the end of each training epoch"""
+        self.epoch += 1
+        metrics = trainer.callback_metrics
+        
+        log_dict = {"epoch": self.epoch}
+        
+        # Extract train and validation losses
+        if 'train_loss' in metrics:
+            log_dict['train_loss'] = float(metrics['train_loss'])
+        if 'val_loss' in metrics:
+            log_dict['val_loss'] = float(metrics['val_loss'])
+        
+        # Track any other available metrics
+        for key, value in metrics.items():
+            if key not in ['train_loss', 'val_loss']:
+                log_dict[key] = float(value)
+        
+        self.metrics_history.append(log_dict)
+        
+        # Optional: print metrics to console
+        print(f"Epoch {self.epoch}: {log_dict}")
+    
+    def get_metrics_history(self):
+        """Return the full metrics history"""
+        return self.metrics_history

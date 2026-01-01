@@ -13,7 +13,8 @@ from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster,
                             CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import (TimeSeriesDatasetVectorizedExog, 
-                    generate_out_of_sample_predictions_vectorized_exog, WandBLoggingCallback)
+                    generate_out_of_sample_predictions_vectorized_exog, WandBLoggingCallback, 
+                    MetricsLoggingCallback)
 
 from neuralforecast.losses.pytorch import MSE, MAE
 
@@ -281,6 +282,7 @@ if __name__ == "__main__":
             if MODEL in ['NBEATS', 'NBEATSx']:
                 from neuralforecast import NeuralForecast
                 from neuralforecast.models import NBEATS, NBEATSx
+                wb_callback = MetricsLoggingCallback()  # No W&B run during optimization
                 
                 # Prepare data in NeuralForecast format
                 df_train_nf = train_dataset_df.copy()
@@ -304,7 +306,8 @@ if __name__ == "__main__":
                         n_blocks=hyperparams['n_blocks'],
                         mlp_units=hyperparams['mlp_units'],
                         scaler_type='robust',
-                        random_seed=PYTORCH_SEED
+                        random_seed=PYTORCH_SEED, 
+                        callbacks=[wb_callback] 
                     )
                     
                     nf = NeuralForecast(models=[nf_model], freq='ME')
@@ -337,20 +340,19 @@ if __name__ == "__main__":
                         scaler_type='robust',
                         stat_exog_list=stat_exog_list,
                         futr_exog_list=exog_columns,
-                        random_seed=PYTORCH_SEED
+                        random_seed=PYTORCH_SEED, 
+                        callbacks=[wb_callback] 
                     )
                     
                     nf = NeuralForecast(models=[nf_model], freq='ME')
                     nf.fit(df=df_train_nf, static_df=static_df, val_size=val_size)
                 
                 # Get validation loss from trainer callback metrics
-                if hasattr(nf.models[0], 'trainer') and hasattr(nf.models[0].trainer, 'callback_metrics'):
-                    metrics = nf.models[0].trainer.callback_metrics
-                    best_val_loss = metrics.get('valid_loss', metrics.get('val_loss', float('inf')))
-                    if isinstance(best_val_loss, torch.Tensor):
-                        best_val_loss = best_val_loss.item()
+                if hasattr(nf.models[0], 'metrics'):
+                    best_val_loss = nf.models[0].metrics.get('valid_loss', float('inf'))
                 else:
-                    best_val_loss = float('inf')
+                    raise RuntimeError("Trainer or callback_metrics not found in NeuralForecast model.")
+                    #best_val_loss = float('inf')
                 
                 return best_val_loss
             

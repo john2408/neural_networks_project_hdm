@@ -23,7 +23,7 @@ if __name__ == "__main__":
     # TRAINING PARAMETERS
     # ========================================================================
 
-    MODE = "UNI"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
+    MODE = "EXO"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
     MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
     ENTITY_NAME = "tensor-torres"
     PROJECT_NAME = "neuralnetworks-timeseries"
@@ -65,7 +65,7 @@ if __name__ == "__main__":
 
     # HYPERPARAMETER OPTIMIZATION WITH OPTUNA
     OPTIMIZE_HYPERPARAMETERS = True  # Set to False to skip optimization
-    N_TRIALS = 3  # Number of Optuna trials
+    N_TRIALS = 2  # Number of Optuna trials
     OPTUNA_TIMEOUT = 900  # Timeout in seconds (15 minutes)
 
 
@@ -112,9 +112,12 @@ if __name__ == "__main__":
     value_col = 'Value'
     
     if MODE == "UNI":
-        features = ['Year', 'Month']
+        features = []
     elif MODE == "EXO":
+        cols_to_drop = ['OEM', 'Model', 'drive_type']
+        df_full = df_full.drop(columns=cols_to_drop)
         features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
+        
 
     #Validate not NaN or infinite values in features
     assert not df_full[features].isna().any().any(), "NaN values found in features"
@@ -180,7 +183,7 @@ if __name__ == "__main__":
     best_trial = None
     if OPTIMIZE_HYPERPARAMETERS and MODEL not in ['BASELINE']:
         import optuna
-        from neuralts.core.func import create_univariate_model_from_trial, train_with_early_stopping
+        from neuralts.core.func import create_model_from_trial, train_with_early_stopping
         
         print("\n" + "="*80)
         print("HYPERPARAMETER OPTIMIZATION WITH OPTUNA")
@@ -233,7 +236,7 @@ if __name__ == "__main__":
             batch_size = trial.suggest_categorical('batch_size', [32, 64, 128])
             
             # Create model with trial hyperparameters
-            model, hyperparams = create_univariate_model_from_trial(
+            model, hyperparams = create_model_from_trial(
                 MODEL, trial, INPUT_SIZE_OPT, SEQ_LENGTH
             )
             model = model.to(device)
@@ -804,8 +807,8 @@ if __name__ == "__main__":
             axes[0].plot(train_losses, label='Training Loss', linewidth=2, color='#2E86AB')
             axes[0].plot(val_losses, label='Validation Loss', linewidth=2, color='#A23B72')
             axes[0].set_xlabel('Epoch', fontsize=12)
-            axes[0].set_ylabel('Loss (MSE)', fontsize=12)
-            axes[0].set_title(f'{fold_config["name"]} - Training History', fontsize=13, fontweight='bold')
+            axes[0].set_ylabel('Loss (MSA)', fontsize=12)
+            axes[0].set_title(f'{MODEL} - {fold_config["name"]} ({fold_config["test_start"]} to {fold_config["test_end"]}) - Training History', fontsize=13, fontweight='bold')
             axes[0].legend(fontsize=10)
             axes[0].grid(True, alpha=0.3)
             
@@ -816,7 +819,7 @@ if __name__ == "__main__":
                     'r--', linewidth=2, label='Perfect Prediction')
             axes[1].set_xlabel('Actual Values', fontsize=12)
             axes[1].set_ylabel('Predicted Values', fontsize=12)
-            axes[1].set_title(f'{fold_config["name"]} - Predictions (R²={r2:.4f}, SMAPE={smape_score:.2f}%)', 
+            axes[1].set_title(f'{MODEL} - {fold_config["name"]} ({fold_config["test_start"]} to {fold_config["test_end"]}) - Predictions (R²={r2:.4f}, SMAPE={smape_score:.2f}%)', 
                     fontsize=13, fontweight='bold')
             axes[1].legend(fontsize=10)
             axes[1].grid(True, alpha=0.3)

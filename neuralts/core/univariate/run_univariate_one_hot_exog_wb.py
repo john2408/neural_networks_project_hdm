@@ -23,7 +23,7 @@ if __name__ == "__main__":
     # TRAINING PARAMETERS
     # ========================================================================
 
-    MODE = "UNI"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
+    MODE = "EXO"  # Options: "UNI": Univariate (Only Month and Year), "EXO": Exogenous Variable (All features)
     MODEL = 'RNN'  # Options: 'LSTM', 'RNN', 'GRU', 'CNN1D', 'MLP', 'Transformer', 'BASELINE'
     ENTITY_NAME = "tensor-torres"
     PROJECT_NAME = "neuralnetworks-timeseries"
@@ -114,7 +114,10 @@ if __name__ == "__main__":
     if MODE == "UNI":
         features = []
     elif MODE == "EXO":
+        cols_to_drop = ['OEM', 'Model', 'drive_type']
+        df_full = df_full.drop(columns=cols_to_drop)
         features = [col for col in df_full.columns if col not in [date_col, ts_key_col, value_col]]
+        
 
     #Validate not NaN or infinite values in features
     assert not df_full[features].isna().any().any(), "NaN values found in features"

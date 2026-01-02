@@ -1975,7 +1975,7 @@ def create_model_from_trial(model_type, trial, input_size, seq_length):
         
         # Suggest hyperparameters
         dropout = trial.suggest_float('dropout_prob_theta', 0.0, 0.7)
-        max_steps = trial.suggest_categorical('max_steps', [200, 300, 500, 700])
+        max_steps = trial.suggest_categorical('max_steps', [50, 100, 200, 300, 500])
         n_harmonics = trial.suggest_int('n_harmonics', 1, 4)
         n_basis = trial.suggest_int('n_polynomials', 1, 4)
         n_blocks = trial.suggest_categorical('n_blocks', [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
@@ -2001,7 +2001,7 @@ def create_model_from_trial(model_type, trial, input_size, seq_length):
         
         # Suggest hyperparameters
         dropout = trial.suggest_float('dropout_prob_theta', 0.0, 0.7)
-        max_steps = trial.suggest_categorical('max_steps', [200, 300, 500, 700])
+        max_steps = trial.suggest_categorical('max_steps', [50, 100, 200, 300, 500])
         n_harmonics = trial.suggest_int('n_harmonics', 1, 4)
         n_basis = trial.suggest_int('n_polynomials', 1, 4)
         basis = trial.suggest_categorical('basis', ['polynomial'])
@@ -2208,3 +2208,37 @@ class WandBLoggingCallback(Callback):
         
         if self.wandb_run is not None:
             self.wandb_run.log(log_dict)
+
+class MetricsLoggingCallback(Callback):
+    """Custom callback to track training metrics without W&B"""
+    def __init__(self):
+        super().__init__()
+        self.epoch = 0
+        self.metrics_history = []
+    
+    def on_train_epoch_end(self, trainer, pl_module):
+        """Track metrics at the end of each training epoch"""
+        self.epoch += 1
+        metrics = trainer.callback_metrics
+        
+        log_dict = {"epoch": self.epoch}
+        
+        # Extract train and validation losses
+        if 'train_loss' in metrics:
+            log_dict['train_loss'] = float(metrics['train_loss'])
+        if 'val_loss' in metrics:
+            log_dict['val_loss'] = float(metrics['val_loss'])
+        
+        # Track any other available metrics
+        for key, value in metrics.items():
+            if key not in ['train_loss', 'val_loss']:
+                log_dict[key] = float(value)
+        
+        self.metrics_history.append(log_dict)
+        
+        # Optional: print metrics to console
+        print(f"Epoch {self.epoch}: {log_dict}")
+    
+    def get_metrics_history(self):
+        """Return the full metrics history"""
+        return self.metrics_history

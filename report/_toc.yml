@@ -28,7 +28,7 @@ parts:
   - file: 3_11_CNN_1D_multi
   - file: 3_12_NBEATS_Model_uni
   - file: 3_13_NBEATSx_Model_multi
-  - file: 3_14_Comparison_of_Models
+  - file: 3_14_Model_Comparison
 - caption: Results and Conclusion
   chapters:
   - file: 4_1_Results_and_Conclusion

@@ -1,0 +1,17 @@
+Model,Approach,Features,Fold,MSE,RMSE,MAE,R2,SMAPE
+Transformer,Uni,noExog,Fold1,87273.90,295.42,123.19,0.8435,73.07%
+Transformer,Uni,noExog,Fold2,72751.26,269.72,114.57,0.8549,76.43%
+Transformer,Uni,noExog,Fold3,68857.17,262.41,105.59,0.8689,67.63%
+Transformer,Uni,noExog,Average,76294.11 ± 9477.14,275.85 ± 17.10,114.45 ± 8.99,0.8558 ± 0.0119,72.37% ± 4.44%
+Transformer,Uni,Exog,Fold1,84489.99,290.67,128.24,0.8485,80.83%
+Transformer,Uni,Exog,Fold2,69839.40,264.27,117.89,0.8607,92.13%
+Transformer,Uni,Exog,Fold3,69854.64,264.30,104.96,0.8670,75.45%
+Transformer,Uni,Exog,Average,74727.68 ± 8527.60,273.08 ± 14.52,117.03 ± 11.92,0.8587 ± 0.0094,82.80% ± 8.34%
+Transformer,Multi,noExog,Fold1,74463.94,272.88,114.80,0.8524,83.17%
+Transformer,Multi,noExog,Fold2,79190.88,281.41,114.12,0.8251,91.09%
+Transformer,Multi,noExog,Fold3,69676.99,263.96,100.54,0.8567,72.45%
+Transformer,Multi,noExog,Average,74443.94 ± 4756.98,272.75 ± 8.72,109.82 ± 8.05,0.8448 ± 0.0171,82.24% ± 9.35%
+Transformer,Multi,Exog,Fold1,255446.32,505.42,438.53,0.4938,136.59%
+Transformer,Multi,Exog,Fold2,279882.45,529.04,483.49,0.3820,139.74%
+Transformer,Multi,Exog,Fold3,86907.71,294.80,144.08,0.8213,114.67%
+Transformer,Multi,Exog,Average,207412.16 ± 105072.71,443.09 ± 128.96,355.36 ± 184.35,0.5657 ± 0.2283,130.33% ± 13.65%

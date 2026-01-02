@@ -13,7 +13,8 @@ from neuralts.core.models import (LSTMForecaster, RNNForecaster, GRUForecaster,
                             CNN1DForecaster, MLPForecaster, TransformerForecaster, TransformerForecasterCLS)
 from neuralts.core.metrics import smape, calculate_smape_distribution
 from neuralts.core.func import (TimeSeriesDatasetVectorizedExog, 
-                    generate_out_of_sample_predictions_vectorized_exog, WandBLoggingCallback)
+                    generate_out_of_sample_predictions_vectorized_exog, WandBLoggingCallback, 
+                    MetricsLoggingCallback)
 
 from neuralforecast.losses.pytorch import MSE, MAE
 
@@ -281,6 +282,7 @@ if __name__ == "__main__":
             if MODEL in ['NBEATS', 'NBEATSx']:
                 from neuralforecast import NeuralForecast
                 from neuralforecast.models import NBEATS, NBEATSx
+                wb_callback = MetricsLoggingCallback()  # No W&B run during optimization
                 
                 # Prepare data in NeuralForecast format
                 df_train_nf = train_dataset_df.copy()
@@ -304,18 +306,26 @@ if __name__ == "__main__":
                         n_blocks=hyperparams['n_blocks'],
                         mlp_units=hyperparams['mlp_units'],
                         scaler_type='robust',
-                        random_seed=PYTORCH_SEED
+                        random_seed=PYTORCH_SEED, 
+                        callbacks=[wb_callback] 
                     )
                     
                     nf = NeuralForecast(models=[nf_model], freq='ME')
                     nf.fit(df=df_train_nf, val_size=val_size)
+
+                                        # Get validation loss from trainer callback metrics
+                    if hasattr(nf.models[0], 'metrics'):
+                        best_val_loss = nf.models[0].metrics.get('valid_loss', float('inf'))
+                    else:
+                        raise RuntimeError("Trainer or callback_metrics not found in NeuralForecast model.")
+                        #best_val_loss = float('inf')
+                    
+                    return best_val_loss
                     
                 elif MODEL == 'NBEATSx':
-                    if EXOG:
-                        df_train_nf = df_train_nf[['unique_id', 'ds', 'y'] + exog_columns].sort_values(['unique_id', 'ds'])
-                    else:
-                        df_train_nf = df_train_nf[['unique_id', 'ds', 'y']].sort_values(['unique_id', 'ds'])
-                    
+                    assert EXOG, "Exogenous features must be enabled for NBEATSx model."
+                    df_train_nf = df_train_nf[['unique_id', 'ds', 'y'] + exog_columns].sort_values(['unique_id', 'ds'])
+
                     # Create static dataframe with one-hot encoded series IDs
                     unique_ids = df_train_nf['unique_id'].unique()
                     static_df = pd.DataFrame({'unique_id': unique_ids})
@@ -337,20 +347,19 @@ if __name__ == "__main__":
                         scaler_type='robust',
                         stat_exog_list=stat_exog_list,
                         futr_exog_list=exog_columns,
-                        random_seed=PYTORCH_SEED
+                        random_seed=PYTORCH_SEED, 
+                        callbacks=[wb_callback] 
                     )
                     
                     nf = NeuralForecast(models=[nf_model], freq='ME')
                     nf.fit(df=df_train_nf, static_df=static_df, val_size=val_size)
                 
                 # Get validation loss from trainer callback metrics
-                if hasattr(nf.models[0], 'trainer') and hasattr(nf.models[0].trainer, 'callback_metrics'):
-                    metrics = nf.models[0].trainer.callback_metrics
-                    best_val_loss = metrics.get('valid_loss', metrics.get('val_loss', float('inf')))
-                    if isinstance(best_val_loss, torch.Tensor):
-                        best_val_loss = best_val_loss.item()
+                if hasattr(nf.models[0], 'metrics'):
+                    best_val_loss = nf.models[0].metrics.get('valid_loss', float('inf'))
                 else:
-                    best_val_loss = float('inf')
+                    raise RuntimeError("Trainer or callback_metrics not found in NeuralForecast model.")
+                    #best_val_loss = float('inf')
                 
                 return best_val_loss
             
@@ -1226,8 +1235,8 @@ if __name__ == "__main__":
             axes[0].plot(train_losses, label='Training Loss', linewidth=2, color='#2E86AB')
             axes[0].plot(val_losses, label='Validation Loss', linewidth=2, color='#A23B72')
             axes[0].set_xlabel('Epoch', fontsize=12)
-            axes[0].set_ylabel('Loss (MSE)', fontsize=12)
-            axes[0].set_title(f'{fold_config["name"]} - Training History', fontsize=13, fontweight='bold')
+            axes[0].set_ylabel('Loss (MAE)', fontsize=12)
+            axes[0].set_title(f'{MODEL} - {fold_config["name"]} ({fold_config["test_start"]} to {fold_config["test_end"]}) - Training History', fontsize=13, fontweight='bold')
             axes[0].legend(fontsize=10)
             axes[0].grid(True, alpha=0.3)
             
@@ -1238,8 +1247,8 @@ if __name__ == "__main__":
                     'r--', linewidth=2, label='Perfect Prediction')
             axes[1].set_xlabel('Actual Values', fontsize=12)
             axes[1].set_ylabel('Predicted Values', fontsize=12)
-            axes[1].set_title(f'{fold_config["name"]} - Predictions (R²={r2:.4f}, SMAPE={smape_score:.2f}%)', 
-                    fontsize=13, fontweight='bold')
+            axes[1].set_title(f'{MODEL} - {fold_config["name"]} ({fold_config["test_start"]} to {fold_config["test_end"]}) - Predictions (R²={r2:.4f}, SMAPE={smape_score:.2f}%)', 
+                        fontsize=13, fontweight='bold')
             axes[1].legend(fontsize=10)
             axes[1].grid(True, alpha=0.3)
             

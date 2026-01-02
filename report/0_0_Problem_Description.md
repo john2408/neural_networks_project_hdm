@@ -50,45 +50,26 @@ The project follows the **Medallion Architecture** to ensure data quality and tr
 
 #### 🥉 Bronze Layer (`data/raw/`)
 - **Purpose:** Raw, unprocessed data as ingested from source systems
-- **Content:** 
-  - Original Excel files from KBA FZ10 monthly reports
-  - External economic indicators (GDP, interest rates, fuel prices)
-  - Sociodemographic data from Stastical Bundesamt
-- **Characteristics:** Immutable historical record, no transformations applied
 
 #### 🥈 Silver Layer (`data/processed/`)
 - **Purpose:** Cleaned, validated, and standardized data
-- **Transformations:**
-  - Column name standardization
-  - Missing value imputation
-  - Data type conversions
-  - Wide-to-long format transformation
-  - Creation of unique time series identifiers (`ts_key`)
-  - Filtering (minimum 12 months of history)
-  - Keep timeseries which are active up to Oct 2025
-- **Output:** Parquet files optimized for analytics
 
 #### 🥇 Gold Layer (`data/gold/`)
 - **Purpose:** Feature-engineered, analysis-ready datasets
-- **Enhancements:**
-  - Temporal features (year, month, quarter, seasonality indicators)
-  - Lag features (historical values at various time steps)
-  - Rolling statistics (moving averages, volatility measures)
-  - Integration of exogenous variables (economic indicators aligned to time series)
-  - Train/validation/test splits with embargo periods to prevent data leakage
-- **Output:** Optimized datasets for model training and evaluation
 
 ### Forecasting Algorithms
 
-The study benchmarks five state-of-the-art neural network architectures for time series forecasting:
+The study benchmarks the follwing neural network architectures for time series forecasting:
 
-| Algorithm | Type | Key Characteristics |
-|-----------|------|---------------------|
-| **LSTM** | Recurrent Neural Network | Long Short-Term Memory networks with gating mechanisms to capture long-term dependencies |
-| **RNN** | Recurrent Neural Network | Vanilla recurrent architecture serving as baseline for sequential modeling |
-| **N-BEATS** | Deep Learning | Neural Basis Expansion Analysis for Time Series with interpretable decomposition |
-| **N-BEATSx** | Deep Learning | Extended N-BEATS variant incorporating exogenous variables (economic indicators) |
-| **Chronos2** | Foundation Model | Pretrained transformer-based model leveraging zero-shot forecasting capabilities |
+- **MLP**: Multi-Layer Perceptron (fully connected feedforward network)
+- **RNN**: Recurrent Neural Network (vanilla architecture with recurrent connections)
+- **LSTM**: Long Short-Term Memory (RNN with gating mechanisms for long-term dependencies)
+- **GRU**: Gated Recurrent Unit (simplified LSTM variant with fewer parameters)
+- **Transformer**: Self-attention-based architecture for sequence modeling
+- **CNN1D**: One-Dimensional Convolutional Neural Network (temporal pattern extraction)
+- **N-BEATS**: Neural Basis Expansion Analysis for Time Series [Ref Paper](https://arxiv.org/pdf/1905.10437)
+- **N-BEATSx**: N-BEATS with exogenous variable support [Ref Paper](https://arxiv.org/pdf/2104.05522)
+
 
 ### Evaluation Framework
 
@@ -98,11 +79,7 @@ The study benchmarks five state-of-the-art neural network architectures for time
 - **Success Criteria:** Minimizing SMAPE across all 1,502 time series
 
 **Model Comparison Criteria:**
-- Forecasting accuracy (SMAPE, MAE, RMSE)
-- Computational efficiency (training time, inference speed)
-- Robustness to outliers and structural breaks
-- Ability to leverage exogenous variables
-- Scalability to high-dimensional problems
+- Forecasting accuracy (SMAPE, MAE, RMSE, R2)
 
 ### Implementation Workflow
 

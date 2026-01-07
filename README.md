@@ -41,6 +41,21 @@ The automotive industry is undergoing a significant transformation driven by the
 - **Identify** patterns and trends in the adoption of alternative powertrains (BEV, Hybrid)
 - **Provide** actionable insights for strategic planning and market analysis
 
+### Reproducing Experiments via Google Colab
+
+All experiments and model training conducted in this project can be fully reproduced using **Google Colab** with GPU acceleration. The notebooks are optimized for and tested on the following configuration:
+
+- **GPU:** NVIDIA L4 GPU (24 GB VRAM)
+- **RAM:** 53 GB system memory
+- **Environment:** Python 3.12+ with PyTorch Lightning
+
+The Google Colab notebooks are located in [`notebooks/google_colab/`](notebooks/google_colab/) and include:
+- **Univariate forecasting** (one-hot encoded approach)
+- **Multivariate vectorized forecasting** (cross-series learning)
+- Both **noExog** and **Exog** feature configurations
+
+Each notebook contains step-by-step instructions for mounting Google Drive, installing dependencies, and training all eight model architectures with hyperparameter optimization. This enables anyone to reproduce the results without requiring local GPU resources.
+
 ---
 
 ## Dataset

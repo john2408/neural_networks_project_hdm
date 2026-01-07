@@ -36,7 +36,7 @@ Generate accurate multi-horizon forecasts across three distinct test periods to 
 
 Each model is trained exclusively on data preceding its respective test period, enabling evaluation across varying market conditions. Performance metrics are averaged across all three folds to establish true model performance.
 
-**Use Cases:**
+**Possible Use Cases:**
 - **Production Planning:** Optimizing manufacturing schedules and inventory management
 - **Market Analysis:** Identifying growth opportunities and declining segments
 - **Strategic Decision-Making:** Informing investment in powertrain technologies
@@ -70,6 +70,17 @@ The study benchmarks the follwing neural network architectures for time series f
 - **N-BEATS**: Neural Basis Expansion Analysis for Time Series [Ref Paper](https://arxiv.org/pdf/1905.10437)
 - **N-BEATSx**: N-BEATS with exogenous variable support [Ref Paper](https://arxiv.org/pdf/2104.05522)
 
+### Exogenous Features 
+
+To enhance forecasting accuracy, we incorporated carefully selected exogenous variables that capture macroeconomic conditions and market dynamics on a monthly basis:
+
+- **Consumer Price Index**: Consumer price index is sourced from the Statistisches Bundesamt. [Link](https://www-genesis.destatis.de/datenbank/online/statistic/61111/table/61111-0002)
+- **Deposit Facility Rate**: Deposit facility rate data is sourced from Deutsche Bundesbank. [Link](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/759784/759784?listId=www_szista_mb01)
+- **Employment Level:** Employment level data is available at Deutsche Bundesbank. [Link](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?tsId=BBDL1.M.DE.N.EMP.EBA000.A0000.A00.D00.0.ABA.A&listId=www_siws_mb09_06b&dateSelect=2025
+)
+- **Gross Domestic Product:** GDP Data is available at Deutsche Bundesbank Website. [Link](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?listId=www_ssb_lr_bip&tsId=BBNZ1.Q.DE.N.H.0000.L&dateSelect=2025)
+- **Marginal Lending Rate**: Marginal Lending Rate is available at Deutsche Bundesbank Website. [Link](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/759784/759784?listId=www_szista_mb01)
+- **Historical Oil Prices**: The historical oil prices are available at the European Commission Website. [Link](https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en)
 
 ### Evaluation Framework
 
@@ -80,6 +91,14 @@ The study benchmarks the follwing neural network architectures for time series f
 
 **Model Comparison Criteria:**
 - Forecasting accuracy (SMAPE, MAE, RMSE, R2)
+
+### Modelling Approach 
+
+The following image summirizes the modelling approach:
+
+![Train-Test-Val](./img/Train_Test_Val_process.png)
+
+Our framework combines Optuna-based hyperparameter optimization with three-fold cross-temporal validation. After tuning on Fold 1 (architecture parameters, learning rates, batch sizes), the optimal configuration is evaluated across all folds using early stopping and autoregressive forecasting. Experiments are tracked via Weights & Biases, with comprehensive metrics (MSE, RMSE, MAE, R², SMAPE) aggregated across all validation periods.
 
 ### Implementation Workflow
 

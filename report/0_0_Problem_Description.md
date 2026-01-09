@@ -36,7 +36,7 @@ Generate accurate multi-horizon forecasts across three distinct test periods to 
 
 Each model is trained exclusively on data preceding its respective test period, enabling evaluation across varying market conditions. Performance metrics are averaged across all three folds to establish true model performance.
 
-**Use Cases:**
+**Possible Use Cases:**
 - **Production Planning:** Optimizing manufacturing schedules and inventory management
 - **Market Analysis:** Identifying growth opportunities and declining segments
 - **Strategic Decision-Making:** Informing investment in powertrain technologies
@@ -50,45 +50,37 @@ The project follows the **Medallion Architecture** to ensure data quality and tr
 
 #### 🥉 Bronze Layer (`data/raw/`)
 - **Purpose:** Raw, unprocessed data as ingested from source systems
-- **Content:** 
-  - Original Excel files from KBA FZ10 monthly reports
-  - External economic indicators (GDP, interest rates, fuel prices)
-  - Sociodemographic data from Stastical Bundesamt
-- **Characteristics:** Immutable historical record, no transformations applied
 
 #### 🥈 Silver Layer (`data/processed/`)
 - **Purpose:** Cleaned, validated, and standardized data
-- **Transformations:**
-  - Column name standardization
-  - Missing value imputation
-  - Data type conversions
-  - Wide-to-long format transformation
-  - Creation of unique time series identifiers (`ts_key`)
-  - Filtering (minimum 12 months of history)
-  - Keep timeseries which are active up to Oct 2025
-- **Output:** Parquet files optimized for analytics
 
 #### 🥇 Gold Layer (`data/gold/`)
 - **Purpose:** Feature-engineered, analysis-ready datasets
-- **Enhancements:**
-  - Temporal features (year, month, quarter, seasonality indicators)
-  - Lag features (historical values at various time steps)
-  - Rolling statistics (moving averages, volatility measures)
-  - Integration of exogenous variables (economic indicators aligned to time series)
-  - Train/validation/test splits with embargo periods to prevent data leakage
-- **Output:** Optimized datasets for model training and evaluation
 
 ### Forecasting Algorithms
 
-The study benchmarks five state-of-the-art neural network architectures for time series forecasting:
+The study benchmarks the follwing neural network architectures for time series forecasting:
 
-| Algorithm | Type | Key Characteristics |
-|-----------|------|---------------------|
-| **LSTM** | Recurrent Neural Network | Long Short-Term Memory networks with gating mechanisms to capture long-term dependencies |
-| **RNN** | Recurrent Neural Network | Vanilla recurrent architecture serving as baseline for sequential modeling |
-| **N-BEATS** | Deep Learning | Neural Basis Expansion Analysis for Time Series with interpretable decomposition |
-| **N-BEATSx** | Deep Learning | Extended N-BEATS variant incorporating exogenous variables (economic indicators) |
-| **Chronos2** | Foundation Model | Pretrained transformer-based model leveraging zero-shot forecasting capabilities |
+- **MLP**: Multi-Layer Perceptron (fully connected feedforward network)
+- **RNN**: Recurrent Neural Network (vanilla architecture with recurrent connections)
+- **LSTM**: Long Short-Term Memory (RNN with gating mechanisms for long-term dependencies)
+- **GRU**: Gated Recurrent Unit (simplified LSTM variant with fewer parameters)
+- **Transformer**: Self-attention-based architecture for sequence modeling
+- **CNN1D**: One-Dimensional Convolutional Neural Network (temporal pattern extraction)
+- **N-BEATS**: Neural Basis Expansion Analysis for Time Series [Ref Paper](https://arxiv.org/pdf/1905.10437)
+- **N-BEATSx**: N-BEATS with exogenous variable support [Ref Paper](https://arxiv.org/pdf/2104.05522)
+
+### Exogenous Features 
+
+To enhance forecasting accuracy, we incorporated carefully selected exogenous variables that capture macroeconomic conditions and market dynamics on a monthly basis:
+
+- **Consumer Price Index**: Consumer price index is sourced from the Statistisches Bundesamt. [Link](https://www-genesis.destatis.de/datenbank/online/statistic/61111/table/61111-0002)
+- **Deposit Facility Rate**: Deposit facility rate data is sourced from Deutsche Bundesbank. [Link](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/759784/759784?listId=www_szista_mb01)
+- **Employment Level:** Employment level data is available at Deutsche Bundesbank. [Link](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?tsId=BBDL1.M.DE.N.EMP.EBA000.A0000.A00.D00.0.ABA.A&listId=www_siws_mb09_06b&dateSelect=2025
+)
+- **Gross Domestic Product:** GDP Data is available at Deutsche Bundesbank Website. [Link](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/745582/745582?listId=www_ssb_lr_bip&tsId=BBNZ1.Q.DE.N.H.0000.L&dateSelect=2025)
+- **Marginal Lending Rate**: Marginal Lending Rate is available at Deutsche Bundesbank Website. [Link](https://www.bundesbank.de/dynamic/action/en/statistics/time-series-databases/time-series-databases/759784/759784?listId=www_szista_mb01)
+- **Historical Oil Prices**: The historical oil prices are available at the European Commission Website. [Link](https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en)
 
 ### Evaluation Framework
 
@@ -98,11 +90,15 @@ The study benchmarks five state-of-the-art neural network architectures for time
 - **Success Criteria:** Minimizing SMAPE across all 1,502 time series
 
 **Model Comparison Criteria:**
-- Forecasting accuracy (SMAPE, MAE, RMSE)
-- Computational efficiency (training time, inference speed)
-- Robustness to outliers and structural breaks
-- Ability to leverage exogenous variables
-- Scalability to high-dimensional problems
+- Forecasting accuracy (SMAPE, MAE, RMSE, R2)
+
+### Modelling Approach 
+
+The following image summirizes the modelling approach:
+
+![Train-Test-Val](./img/Train_Test_Val_process.png)
+
+Our framework combines Optuna-based hyperparameter optimization with three-fold cross-temporal validation. After tuning on Fold 1 (architecture parameters, learning rates, batch sizes), the optimal configuration is evaluated across all folds using early stopping and autoregressive forecasting. Experiments are tracked via Weights & Biases, with comprehensive metrics (MSE, RMSE, MAE, R², SMAPE) aggregated across all validation periods.
 
 ### Implementation Workflow
 

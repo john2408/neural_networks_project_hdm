@@ -112,15 +112,50 @@ if __name__ == "__main__":
         "2018_04",
         "2018_03",
         "2018_02",
-        "2018_01",
+        "2017_12",
+        "2017_11",
+        "2017_10",
+        "2017_09",
+        "2017_08",
+        "2017_07",
+        "2017_06",
+        "2017_05",
+        "2017_04",
+        "2017_03",
+        "2017_02",
+        "2017_01",
+        "2016_12",
+        "2016_11",
+        "2016_10",
+        "2016_09",
+        "2016_08",
+        "2016_07",
+        "2016_06",
+        "2016_05",
+        "2016_04",
+        "2016_03",
+        "2016_02",
+        "2016_01",
+        "2015_12",
+        "2015_11",
+        "2015_10",
+        "2015_09",
+        "2015_08",
+        "2015_07",
+        "2015_06",
+        "2015_05",
+        "2015_04",
+        "2015_03",
+        "2015_02",
+        "2015_01",
     ]
 
     # Download Excel File
     for year_month in year_months:
         print("Downloading data for", year_month)
-
+        year = year_month.split("_")[0]
         # Determine URL and file extension based on year/month
-        if year_month.startswith("2018"):
+        if year in ["2018", "2017", "2016", "2015"]:
             month = year_month.split("_")[1]
             if month != "12":
                 url = f"{base_url}{report_type}_{year_month}_xls.xls?__blob=publicationFile&v=2"

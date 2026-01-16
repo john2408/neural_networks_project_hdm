@@ -9,6 +9,7 @@ models/
 lightning_logs/
 wandb/
 wandb/latest-run/
+business_plan/
 
 # C extensions
 *.so
